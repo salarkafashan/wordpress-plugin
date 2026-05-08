@@ -1,0 +1,103 @@
+<?php
+/**
+ * Asset enqueue helper.
+ *
+ * @package SupportRequestFrontend
+ */
+
+namespace SupportRequestFrontend\Includes;
+
+if (!defined('ABSPATH')) {
+	exit;
+}
+
+/**
+ * Enqueue Support Request frontend assets.
+ */
+final class EnqueueSupportRequestAssets
+{
+
+	/**
+	 * Track whether assets were already enqueued.
+	 *
+	 * @var bool
+	 */
+	private static $enqueued = false;
+
+	/**
+	 * Enqueue scripts/styles and localize runtime config.
+	 *
+	 * @return void
+	 */
+	public static function enqueue(): void
+	{
+		if (self::$enqueued) {
+			return;
+		}
+
+		wp_enqueue_style(
+			'kgr-support-request-form',
+			KGR_PLUGIN_URL . 'assets/css/support-request-form.css',
+			array(),
+			KGR_PLUGIN_VERSION
+		);
+
+		wp_enqueue_script(
+			'alpinejs',
+			'https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js',
+			array(),
+			'3.12.0',
+			false
+		);
+
+		wp_enqueue_script(
+			'kgr-support-request-form',
+			KGR_PLUGIN_URL . 'assets/js/support-request-form.js',
+			array(),
+			KGR_PLUGIN_VERSION,
+			true
+		);
+
+		$config = array(
+			'validateWebsiteEndpoint' => home_url('/validate-website'),
+			'submitRequestEndpoint' => home_url('/submit-request'),
+			'requestTimeoutMs' => 25000,
+			'maxNonWebsiteUploadMb' => 10,
+			'maxIssueScreenshots' => 2,
+			'maxScreenshotMb' => 1,
+				'i18n' => array(
+				'next' => __('Next', 'knaguru-support'),
+				'loading' => __('Loading...', 'knaguru-support'),
+				'back' => __('Back', 'knaguru-support'),
+				'sending' => __('Sending your request...', 'knaguru-support'),
+				'submit' => __('Submit request', 'knaguru-support'),
+				'websiteNotFound' => __("We couldn't find your website address. Double check the spelling or reach out to us if you're stuck.", 'knaguru-support'),
+				'genericError' => __('Something went wrong. Please try again or refresh the page.', 'knaguru-support'),
+				'filesNeedReselect' => __('If your browser cleared file selections, please reselect them before sending again.', 'knaguru-support'),
+				'screenshotRule' => __('You can add up to 2 photos (max 1MB each) to show us the problem.', 'knaguru-support'),
+				'nonWebsiteUploadRule' => __('Accepted: images, PDF, Word, Excel, ZIP. Max total 10MB.', 'knaguru-support'),
+				'descriptionMinMessage' => __("Please tell us a bit more so we can help you better (at least 20 characters).", 'knaguru-support'),
+			),
+		);
+
+		/**
+		 * Filter frontend runtime config before it is localized to JS.
+		 *
+		 * @param array $config Runtime config.
+		 */
+		$config = apply_filters('kgr_frontend_config', $config);
+
+
+		wp_localize_script('kgr-support-request-form', 'KGR_CONFIG', $config);
+
+		// Alpine.js recommends/requires defer in most setups
+		add_filter('script_loader_tag', function ($tag, $handle) {
+			if ('alpinejs' !== $handle) {
+				return $tag;
+			}
+			return str_replace(' src', ' defer src', $tag);
+		}, 10, 2);
+
+		self::$enqueued = true;
+	}
+}

@@ -1,0 +1,8 @@
+<IfModule mod_rewrite.c>
+RewriteEngine On
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteRule ^api$ api.php [L,QSA]
+RewriteRule ^confirm$ confirm.php [L,QSA]
+RewriteRule ^webhook-jira$ webhook-jira.php [L,QSA]
+RewriteRule ^admin$ admin.php [L,QSA]
+</IfModule>
