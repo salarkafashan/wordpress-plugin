@@ -6,7 +6,11 @@ require_once dirname(__DIR__) . '/src/bootstrap.php';
 
 use App\helpers\Http;
 use App\helpers\Logger;
+use App\helpers\Security;
 use App\helpers\Validator;
+use App\services\CaptchaService;
+use App\services\HoneypotService;
+use App\services\RateLimiterService;
 use App\services\SupportRequestService;
 
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
@@ -63,6 +67,7 @@ function normalizeFlatFiles(array $fileInput): array
 $payload = $_POST;
 $traceId = 'sub-' . bin2hex(random_bytes(6));
 $payload['_trace_id'] = $traceId;
+$ip = Security::getIp();
 $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
 $host = (string) ($_SERVER['HTTP_HOST'] ?? 'localhost');
 $scriptName = str_replace('\\', '/', (string) ($_SERVER['SCRIPT_NAME'] ?? '/public/submit-request.php'));
@@ -85,6 +90,48 @@ if (!isset($payload['metadata']) || !is_array($payload['metadata'])) {
 }
 if (($payload['service_type'] ?? '') === 'Website' && empty($payload['selected_domain']) && !empty($payload['website_url'])) {
     $payload['selected_domain'] = Validator::normalizeDomainInput((string) $payload['website_url']);
+}
+
+try {
+    $rateKey = 'submit:' . $ip;
+    if (!(new RateLimiterService())->check($rateKey)) {
+        Logger::error('Submit request rejected: rate limit exceeded', [
+            'trace_id' => $traceId,
+            'ip' => $ip,
+        ]);
+        Http::json(['success' => false, 'message' => 'Too many requests. Please try again later.'], 429);
+        exit;
+    }
+
+    $honeypot = (new HoneypotService())->verify($payload);
+    if (empty($honeypot['success'])) {
+        Logger::error('Submit request rejected: honeypot validation failed', [
+            'trace_id' => $traceId,
+            'ip' => $ip,
+        ]);
+        Http::json(['success' => false, 'message' => $honeypot['message'] ?? 'Spam validation failed.'], 422);
+        exit;
+    }
+
+    $captcha = (new CaptchaService())->verify($payload, $ip, 'submit');
+    if (empty($captcha['success'])) {
+        Logger::error('Submit request rejected: captcha validation failed', [
+            'trace_id' => $traceId,
+            'ip' => $ip,
+            'provider' => $captcha['provider'] ?? 'unknown',
+            'errors' => $captcha['errors'] ?? [],
+        ]);
+        Http::json(['success' => false, 'message' => $captcha['message'] ?? 'Captcha validation failed.'], 422);
+        exit;
+    }
+} catch (\Throwable $exception) {
+    Logger::error('Submit request security checks failed', [
+        'trace_id' => $traceId,
+        'ip' => $ip,
+        'error' => $exception->getMessage(),
+    ]);
+    Http::json(['success' => false, 'message' => 'Security validation failed. Please try again.'], 500);
+    exit;
 }
 
 try {

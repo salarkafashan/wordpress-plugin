@@ -10,7 +10,8 @@ final class Logger
 {
     public static function info(string $message, array $context = []): void
     {
-        self::write('INFO', $message, $context);
+        // Keep runtime logs focused on actionable failures.
+        return;
     }
 
     public static function error(string $message, array $context = []): void

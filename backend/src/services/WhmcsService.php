@@ -238,6 +238,9 @@ final class WhmcsService
 
     private function sendJsonRequest(string $url, array $headers, string $rawJsonBody): ?array
     {
+        $timeout = max(3, (int) Config::get('WHMCS_API_TIMEOUT', 12));
+        $connectTimeout = max(2, (int) Config::get('WHMCS_API_CONNECT_TIMEOUT', 5));
+
         if (function_exists('curl_init')) {
 
             $ch = curl_init($url);
@@ -245,7 +248,8 @@ final class WhmcsService
                 CURLOPT_RETURNTRANSFER => true,
                 CURLOPT_POST => true,
                 CURLOPT_FOLLOWLOCATION => true,
-                CURLOPT_TIMEOUT => 30,
+                CURLOPT_CONNECTTIMEOUT => $connectTimeout,
+                CURLOPT_TIMEOUT => $timeout,
                 CURLOPT_HTTPHEADER => $headers,
                 CURLOPT_POSTFIELDS => $rawJsonBody,
             ]);
@@ -293,7 +297,7 @@ final class WhmcsService
                 'header' => implode("\r\n", $headers),
                 'content' => $rawJsonBody,
                 'ignore_errors' => true,
-                'timeout' => 30,
+                'timeout' => $timeout,
             ],
         ]);
 

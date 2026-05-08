@@ -31,6 +31,7 @@ final class AdminController
         add_action('wp_ajax_kgr_save_settings', [__CLASS__, 'ajax_save_settings']);
         add_action('wp_ajax_kgr_get_tickets', [__CLASS__, 'ajax_get_tickets']);
         add_action('wp_ajax_kgr_get_ticket_details', [__CLASS__, 'ajax_get_ticket_details']);
+        add_action('wp_ajax_kgr_download_attachment', [__CLASS__, 'ajax_download_attachment']);
         add_action('wp_ajax_kgr_get_mapping_health', [__CLASS__, 'ajax_get_mapping_health']);
         add_action('wp_ajax_kgr_get_client_mappings', [__CLASS__, 'ajax_get_client_mappings']);
         add_action('wp_ajax_kgr_save_client_mapping', [__CLASS__, 'ajax_save_client_mapping']);
@@ -42,6 +43,7 @@ final class AdminController
         add_action('wp_ajax_kgr_test_cloudflare_credentials', [__CLASS__, 'ajax_test_cloudflare_credentials']);
         add_action('wp_ajax_kgr_test_google_credentials', [__CLASS__, 'ajax_test_google_credentials']);
         add_action('admin_head', [__CLASS__, 'inject_menu_icon_styles']);
+        add_action('admin_notices', [__CLASS__, 'render_jira_token_notice']);
     }
 
     public static function inject_menu_icon_styles(): void
@@ -194,11 +196,20 @@ final class AdminController
                     if (empty($fields['test_emails']) || !$validateEmails((string)$fields['test_emails'])) {
                         wp_send_json_error(['message' => 'Invalid or missing sandbox recipient email address(es).']);
                     }
+                } else {
+                    // QA hints must be disabled when sandbox mode is off.
+                    $fields['qa_hints_enabled'] = '0';
                 }
             }
 
             foreach ($fields as $key => $value) {
                 $rawValue = trim((string) $value);
+                if ($tab === 'jira' && $key === 'jira_api_token_expires_on' && $rawValue !== '') {
+                    $dt = \DateTime::createFromFormat('Y-m-d', $rawValue);
+                    if (!$dt || $dt->format('Y-m-d') !== $rawValue) {
+                        wp_send_json_error(['message' => 'Invalid Jira token expiry date. Use YYYY-MM-DD.']);
+                    }
+                }
                 $existingValue = '';
                 if (is_array($existing) && isset($existing[$tab]) && is_array($existing[$tab]) && isset($existing[$tab][$key])) {
                     $existingValue = (string) $existing[$tab][$key];
@@ -217,7 +228,225 @@ final class AdminController
         }
 
         update_option('kgr_setting', $sanitized);
+        if (isset($sanitized['jira'])) {
+            delete_option('kgr_jira_token_alert_state');
+            self::run_jira_token_health_check('settings_save');
+        }
         wp_send_json_success(['message' => 'Settings saved successfully']);
+    }
+
+    public static function run_jira_token_health_check(string $trigger = 'manual'): array
+    {
+        $settings = get_option('kgr_setting', []);
+        $jira = is_array($settings) && isset($settings['jira']) && is_array($settings['jira']) ? $settings['jira'] : [];
+        $tokenRaw = (string) ($jira['jira_api_token'] ?? '');
+        $expiresOnRaw = trim((string) ($jira['jira_api_token_expires_on'] ?? ''));
+        $expiresOn = self::normalize_jira_token_expiry_date($expiresOnRaw);
+
+        $token = self::decrypt($tokenRaw);
+        if ($token === '' && $tokenRaw !== '') {
+            $token = $tokenRaw;
+        }
+
+        $health = [
+            'checked_at' => current_time('mysql'),
+            'trigger' => $trigger,
+            'status' => 'unknown',
+            'expires_on' => $expiresOn,
+            'days_left' => null,
+            'last_validated_at' => '',
+            'message' => '',
+        ];
+
+        if ($token === '') {
+            $health['status'] = 'missing';
+            $health['message'] = 'Jira API token is missing.';
+            update_option('kgr_jira_token_health', $health, false);
+            self::send_jira_token_alert_if_needed($health);
+            return $health;
+        }
+
+        if ($expiresOn !== '') {
+            $today = new \DateTimeImmutable(wp_date('Y-m-d'));
+            $expiry = \DateTimeImmutable::createFromFormat('Y-m-d', $expiresOn);
+            if ($expiry instanceof \DateTimeImmutable) {
+                $diff = (int) $today->diff($expiry)->format('%r%a');
+                $health['days_left'] = $diff;
+                if ($diff < 0) {
+                    $health['status'] = 'expired';
+                    $health['message'] = 'Jira API token expiry date is in the past.';
+                } elseif ($diff <= 30) {
+                    $health['status'] = 'expiring_soon';
+                    $health['message'] = 'Jira API token expires soon.';
+                } else {
+                    $health['status'] = 'valid';
+                }
+            }
+        } else {
+            $health['status'] = 'expiring_soon';
+            $health['message'] = 'Jira API token expiry date is not set.';
+        }
+
+        // Validate credentials against Jira to detect revoked/invalid tokens early.
+        try {
+            $rows = (new JiraService())->searchProjects('', 1, ['trigger' => 'token_health_check']);
+            if (is_array($rows)) {
+                $health['last_validated_at'] = current_time('mysql');
+                if ($health['status'] === 'unknown') {
+                    $health['status'] = 'valid';
+                }
+            }
+        } catch (Throwable $exception) {
+            $health['status'] = 'auth_failed';
+            $health['message'] = 'Jira token validation failed: ' . $exception->getMessage();
+        }
+
+        update_option('kgr_jira_token_health', $health, false);
+        self::send_jira_token_alert_if_needed($health);
+        return $health;
+    }
+
+    public static function render_jira_token_notice(): void
+    {
+        if (!current_user_can('manage_options')) {
+            return;
+        }
+
+        $screen = function_exists('get_current_screen') ? get_current_screen() : null;
+        $screenId = is_object($screen) ? (string) ($screen->id ?? '') : '';
+        if ($screenId !== '' && strpos($screenId, 'kgr') === false && strpos($screenId, 'kanguru') === false) {
+            return;
+        }
+
+        $health = get_option('kgr_jira_token_health', []);
+        if (!is_array($health) || $health === []) {
+            return;
+        }
+
+        $status = (string) ($health['status'] ?? '');
+        if (!in_array($status, ['expiring_soon', 'expired', 'auth_failed', 'missing'], true)) {
+            return;
+        }
+
+        $daysLeft = $health['days_left'];
+        $message = (string) ($health['message'] ?? 'Jira token needs attention.');
+        if (is_numeric($daysLeft)) {
+            $message .= ' Days left: ' . (int) $daysLeft . '.';
+        }
+
+        echo '<div class="notice notice-error"><p><strong>Kanguru Support Jira Token:</strong> ' . esc_html($message) . '</p></div>';
+    }
+
+    private static function send_jira_token_alert_if_needed(array $health): void
+    {
+        $status = (string) ($health['status'] ?? '');
+        if (!in_array($status, ['expiring_soon', 'expired', 'auth_failed', 'missing'], true)) {
+            return;
+        }
+
+        $settings = get_option('kgr_setting', []);
+        $emailsRaw = is_array($settings) && isset($settings['general']['admin_emails']) ? (string) $settings['general']['admin_emails'] : '';
+        $emails = array_values(array_filter(array_map('trim', explode(',', $emailsRaw)), static function (string $email): bool {
+            return (bool) filter_var($email, FILTER_VALIDATE_EMAIL);
+        }));
+        if ($emails === []) {
+            return;
+        }
+
+        $daysLeft = isset($health['days_left']) && is_numeric($health['days_left']) ? (int) $health['days_left'] : null;
+        $bucket = $status;
+        if ($status === 'expiring_soon') {
+            $thresholds = [30, 14, 7, 3, 1, 0];
+            $selected = 30;
+            if ($daysLeft !== null) {
+                foreach ($thresholds as $t) {
+                    if ($daysLeft <= $t) {
+                        $selected = $t;
+                    }
+                }
+            }
+            $bucket = 'expiring_' . $selected;
+        }
+
+        $state = get_option('kgr_jira_token_alert_state', []);
+        if (!is_array($state)) {
+            $state = [];
+        }
+        if (!empty($state[$bucket])) {
+            return;
+        }
+
+        $subject = '[Kanguru Support] Jira Token Alert: ' . strtoupper(str_replace('_', ' ', $status));
+        $expiresOn = (string) ($health['expires_on'] ?? '');
+        $healthMessage = (string) ($health['message'] ?? '');
+        $checkedAt = (string) ($health['checked_at'] ?? '');
+        $actionUrl = 'https://id.atlassian.com/manage-profile/security/api-tokens';
+
+        $content = '<p style="margin:0 0 12px 0;"><strong>Jira token status:</strong> ' . esc_html($status) . '</p>';
+        if ($daysLeft !== null) {
+            $content .= '<p style="margin:0 0 12px 0;"><strong>Days left:</strong> ' . esc_html((string) $daysLeft) . '</p>';
+        }
+        $content .= '<p style="margin:0 0 12px 0;"><strong>Expires on:</strong> ' . esc_html($expiresOn) . '</p>';
+        $content .= '<p style="margin:0 0 12px 0;"><strong>Message:</strong> ' . esc_html($healthMessage) . '</p>';
+        $content .= '<p style="margin:0 0 12px 0;"><strong>Checked at:</strong> ' . esc_html($checkedAt) . '</p>';
+        $content .= '<p style="margin:0 0 14px 0;">Jira API token is expiring soon. To keep receiving Jira tickets from the Kanguru Support plugin, please generate a new API token and update the credentials in the WordPress admin panel.</p>';
+        $content .= '<p style="margin:0;text-align:center;"><a href="' . esc_url($actionUrl) . '" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:10px 14px;background:#00001A;color:#fff;text-decoration:none;border-radius:4px;font-weight:700;">Get Atlassian API Token Now</a></p>';
+        $body = self::wrap_admin_email_html('Jira Token Alert', $content);
+        $headers = ['Content-Type: text/html; charset=UTF-8'];
+
+        foreach ($emails as $email) {
+            wp_mail($email, $subject, $body, $headers);
+        }
+        $state[$bucket] = current_time('mysql');
+        update_option('kgr_jira_token_alert_state', $state, false);
+    }
+
+    private static function wrap_admin_email_html(string $title, string $contentHtml): string
+    {
+        $logoUrl = (string) Config::get('EMAIL_LOGO_URL', 'https://via.placeholder.com/160x48?text=Kanguru+Logo');
+        $safeTitle = esc_html($title);
+        $dateTime = date('Y-m-d H:i:s');
+
+        return '<!doctype html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>' . $safeTitle . '</title></head>
+<body style="margin:0;padding:0;background:#ffffff;font-family:Arial,Helvetica,sans-serif;color:#00001A;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#ffffff;padding:26px 0;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="680" cellspacing="0" cellpadding="0" style="max-width:680px;width:100%;border-collapse:collapse;">
+          <tr>
+            <td style="padding:0 20px 16px 20px;">
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                <tr>
+                  <td align="left" valign="middle">
+                    <img src="' . esc_url($logoUrl) . '" alt="Kanguru Logo" style="max-height:44px;width:auto;">
+                  </td>
+                  <td align="right" valign="middle" style="font-size:12px;color:#00001A;letter-spacing:0.2px;">' . esc_html($dateTime) . '</td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:0 20px;">
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f5f5f5;border-radius:12px;border:1px solid #ececec;">
+                <tr>
+                  <td style="padding:26px;">
+                    <h2 style="margin:0 0 16px 0;font-size:21px;line-height:1.3;color:#00001A;">' . $safeTitle . '</h2>
+                    ' . $contentHtml . '
+                    <hr style="border:none;border-top:1px solid #ddd;margin:24px 0 16px;">
+                    <p style="margin:0;font-size:13px;line-height:1.5;color:#00001A;">Support Team: <a href="mailto:support@kanguru.ca" style="color:#00001A;text-decoration:underline;">support@kanguru.ca</a></p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>';
     }
 
     public static function ajax_get_tickets(): void
@@ -291,12 +520,14 @@ final class AdminController
         foreach ($issues as &$issue) {
             $attachments = $wpdb->get_results($wpdb->prepare("SELECT * FROM {$prefix}attachment WHERE issue_id = %d", $issue['id']), ARRAY_A);
             foreach ($attachments as &$att) {
-                $relative = ltrim((string) ($att['file_path'] ?: $att['temp_path'] ?: ''), '/');
-                if ($relative !== '') {
-                    $att['file_url'] = KGR_PLUGIN_URL . 'backend/' . $relative;
-                } else {
-                    $att['file_url'] = '';
-                }
+                $attachmentId = (int) ($att['id'] ?? 0);
+                $att['file_url'] = $attachmentId > 0
+                    ? wp_nonce_url(
+                        admin_url('admin-ajax.php?action=kgr_download_attachment&attachment_id=' . $attachmentId),
+                        'kgr_download_attachment_' . $attachmentId,
+                        'nonce'
+                    )
+                    : '';
             }
             $issue['attachments'] = $attachments;
         }
@@ -305,6 +536,83 @@ final class AdminController
             'request' => $request,
             'issues' => $issues
         ]);
+    }
+
+    public static function ajax_download_attachment(): void
+    {
+        if (!current_user_can('manage_options')) {
+            status_header(403);
+            wp_die('Unauthorized');
+        }
+
+        $attachmentId = isset($_GET['attachment_id']) ? (int) $_GET['attachment_id'] : 0;
+        if ($attachmentId <= 0) {
+            status_header(400);
+            wp_die('Invalid attachment ID.');
+        }
+
+        $nonce = isset($_GET['nonce']) ? (string) $_GET['nonce'] : '';
+        if (!wp_verify_nonce($nonce, 'kgr_download_attachment_' . $attachmentId)) {
+            status_header(403);
+            wp_die('Invalid security token.');
+        }
+
+        global $wpdb;
+        $table = $wpdb->prefix . 'kgr_support_attachment';
+        $attachment = $wpdb->get_row(
+            $wpdb->prepare("SELECT * FROM {$table} WHERE id = %d LIMIT 1", $attachmentId),
+            ARRAY_A
+        );
+        if (!$attachment) {
+            status_header(404);
+            wp_die('Attachment not found.');
+        }
+
+        $relativePath = (string) ($attachment['file_path'] ?: $attachment['temp_path'] ?: '');
+        if ($relativePath === '') {
+            status_header(404);
+            wp_die('Attachment file path not found.');
+        }
+
+        $baseStorage = realpath(KGR_BACKEND_PATH . 'storage');
+        $absolutePath = realpath(KGR_BACKEND_PATH . ltrim($relativePath, '/'));
+        if ($baseStorage === false || $absolutePath === false || !is_file($absolutePath)) {
+            status_header(404);
+            wp_die('Attachment file not found.');
+        }
+
+        $baseStorageNormalized = rtrim(str_replace('\\', '/', $baseStorage), '/') . '/';
+        $absoluteNormalized = str_replace('\\', '/', $absolutePath);
+        if (strpos($absoluteNormalized, $baseStorageNormalized) !== 0) {
+            status_header(403);
+            wp_die('Access denied.');
+        }
+
+        $originalName = (string) ($attachment['original_name'] ?? basename($absolutePath));
+        $filename = sanitize_file_name($originalName);
+        if ($filename === '') {
+            $filename = basename($absolutePath);
+        }
+
+        $mimeType = (string) ($attachment['mime_type'] ?? '');
+        if ($mimeType === '' || $mimeType === 'application/octet-stream') {
+            $finfo = function_exists('finfo_open') ? finfo_open(FILEINFO_MIME_TYPE) : false;
+            $detected = $finfo ? finfo_file($finfo, $absolutePath) : false;
+            if ($finfo) {
+                finfo_close($finfo);
+            }
+            $mimeType = is_string($detected) && $detected !== '' ? $detected : 'application/octet-stream';
+        }
+
+        nocache_headers();
+        header('Content-Description: File Transfer');
+        header('Content-Type: ' . $mimeType);
+        header('Content-Disposition: attachment; filename="' . rawurlencode($filename) . '"');
+        header('Content-Length: ' . (string) filesize($absolutePath));
+        header('X-Content-Type-Options: nosniff');
+        header('X-Robots-Tag: noindex, nofollow', true);
+        readfile($absolutePath);
+        exit;
     }
 
     public static function ajax_get_mapping_health(): void
@@ -538,139 +846,7 @@ final class AdminController
 
     public static function sync_jira_catalog(?array &$stats = null, string $trigger = 'unknown'): array
     {
-        global $wpdb;
-        $mapTable = $wpdb->prefix . 'kgr_support_client_jira_map';
-        $rows = (new JiraService())->searchProjects('', 200, [
-            'trigger' => $trigger,
-        ]);
-        $now = current_time('mysql');
-        $tableExists = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $mapTable)) === $mapTable;
-        $insertedCount = 0;
-        $updatedCount = 0;
-        $failedCount = 0;
-        $sampleProjectIds = array_values(array_filter(array_slice(array_map(
-            static fn(array $r): string => sanitize_text_field((string) ($r['jira_project_id'] ?? '')),
-            $rows
-        ), 0, 5)));
-
-        foreach ($rows as $row) {
-            $projectId = sanitize_text_field((string) ($row['jira_project_id'] ?? ''));
-            if ($projectId === '') {
-                $failedCount++;
-                Logger::error('Jira catalog row skipped: missing jira_project_id', ['row' => $row]);
-                continue;
-            }
-
-            $existing = $wpdb->get_var($wpdb->prepare(
-                "SELECT id FROM {$mapTable} WHERE jira_project_id = %s LIMIT 1",
-                $projectId
-            ));
-
-            $payload = [
-                'whmcs_client_id' => null,
-                'jira_project_id' => $projectId,
-                'jira_project_key' => sanitize_text_field((string) ($row['jira_project_key'] ?? '')),
-                'jira_project_name' => sanitize_text_field((string) ($row['jira_project_name'] ?? '')),
-                'jira_board_id' => sanitize_text_field((string) ($row['jira_board_id'] ?? '')),
-                'jira_space_name' => sanitize_text_field((string) ($row['jira_space_name'] ?? '')),
-                'is_active' => 1,
-                'mapping_source' => 'jira_catalog',
-                'notes' => 'Synced from Jira catalog',
-                'updated_at' => $now,
-            ];
-
-            if ($existing) {
-                // Preserve existing whmcs mapping ownership when project is already mapped.
-                $existingRow = $wpdb->get_row($wpdb->prepare("SELECT whmcs_client_id, mapping_source FROM {$mapTable} WHERE id = %d", (int) $existing), ARRAY_A);
-                if (!empty($existingRow['whmcs_client_id'])) {
-                    $payload['whmcs_client_id'] = (int) $existingRow['whmcs_client_id'];
-                }
-                if (!empty($existingRow['mapping_source']) && $existingRow['mapping_source'] !== 'jira_catalog') {
-                    $payload['mapping_source'] = $existingRow['mapping_source'];
-                }
-                $updated = $wpdb->update($mapTable, $payload, ['id' => (int) $existing]);
-                if ($updated === false) {
-                    $failedCount++;
-                    Logger::error('Jira catalog row update failed', [
-                        'jira_project_id' => $projectId,
-                        'table' => $mapTable,
-                        'last_db_error' => (string) $wpdb->last_error,
-                    ]);
-                } else {
-                    $updatedCount++;
-                }
-            } else {
-                $payload['created_at'] = $now;
-                $inserted = $wpdb->insert($mapTable, $payload);
-                if ($inserted === false) {
-                    $failedCount++;
-                    Logger::error('Jira catalog row insert failed', [
-                        'jira_project_id' => $projectId,
-                        'table' => $mapTable,
-                        'last_db_error' => (string) $wpdb->last_error,
-                        'payload' => $payload,
-                    ]);
-                } else {
-                    $insertedCount++;
-                }
-            }
-        }
-
-        // Mark catalog rows that disappeared from current Jira API response as inactive.
-        $currentIds = array_values(array_filter(array_map(
-            static fn(array $r): string => sanitize_text_field((string) ($r['jira_project_id'] ?? '')),
-            $rows
-        )));
-        if (!empty($currentIds)) {
-            $placeholders = implode(',', array_fill(0, count($currentIds), '%s'));
-            $sql = "UPDATE {$mapTable}
-                    SET is_active = 0, updated_at = %s
-                    WHERE mapping_source = 'jira_catalog'
-                      AND whmcs_client_id IS NULL
-                      AND jira_project_id NOT IN ({$placeholders})";
-            $args = array_merge([$now], $currentIds);
-            $wpdb->query($wpdb->prepare($sql, ...$args));
-        }
-
-        // Closed/archived catalog projects should not be retained in local mapping catalog.
-        $wpdb->query(
-            "DELETE FROM {$mapTable}
-             WHERE mapping_source = 'jira_catalog'
-               AND whmcs_client_id IS NULL
-               AND (
-                    is_active = 0
-                    OR UPPER(COALESCE(jira_project_name, '')) LIKE '[CLOSED]%'
-                    OR UPPER(COALESCE(jira_project_name, '')) LIKE '[ARCHIVED]%'
-                    OR LOWER(COALESCE(jira_space_name, '')) IN ('archived', 'closed')
-               )"
-        );
-
-        update_option('kgr_jira_catalog_last_synced_at', $now, false);
-        $tableTotalRows = 0;
-        $tableCatalogRows = 0;
-        if ($tableExists) {
-            $tableTotalRows = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$mapTable}");
-            $tableCatalogRows = (int) $wpdb->get_var(
-                "SELECT COUNT(*) FROM {$mapTable} WHERE mapping_source = 'jira_catalog'"
-            );
-        }
-
-        $stats = [
-            'trigger' => $trigger,
-            'table' => $mapTable,
-            'table_exists' => $tableExists,
-            'fetched_count' => count($rows),
-            'inserted_count' => $insertedCount,
-            'updated_count' => $updatedCount,
-            'persisted_rows' => $insertedCount + $updatedCount,
-            'failed_count' => $failedCount,
-            'last_db_error' => (string) $wpdb->last_error,
-            'table_total_rows' => $tableTotalRows,
-            'table_catalog_rows' => $tableCatalogRows,
-            'synced_at' => $now,
-        ];
-
-        return $rows;
+        return AdminJiraCatalogService::sync($stats, $trigger);
     }
 
     public static function ajax_test_jira_credentials(): void
@@ -726,7 +902,7 @@ final class AdminController
             ];
             $url = $baseUrl . $path;
 
-            [$statusCode, $body] = self::http_post_json($url, $headers, $rawJsonBody);
+            [$statusCode, $body] = AdminHttpClient::postJson($url, $headers, $rawJsonBody);
             $decoded = json_decode((string) $body, true);
             if ($statusCode >= 200 && $statusCode < 300) {
                 wp_send_json_success(['message' => 'WHMCS credentials are valid.']);
@@ -753,7 +929,7 @@ final class AdminController
             wp_send_json_error(['message' => 'Cloudflare site key/secret is incomplete.'], 422);
         }
 
-        [$statusCode, $body] = self::http_post_form('https://challenges.cloudflare.com/turnstile/v0/siteverify', [
+        [$statusCode, $body] = AdminHttpClient::postForm('https://challenges.cloudflare.com/turnstile/v0/siteverify', [
             'secret' => $secret,
             'response' => 'kgr-test-invalid-token',
             'remoteip' => isset($_SERVER['REMOTE_ADDR']) ? (string) $_SERVER['REMOTE_ADDR'] : '',
@@ -782,7 +958,7 @@ final class AdminController
             wp_send_json_error(['message' => 'Google site key/secret is incomplete.'], 422);
         }
 
-        [$statusCode, $body] = self::http_post_form('https://www.google.com/recaptcha/api/siteverify', [
+        [$statusCode, $body] = AdminHttpClient::postForm('https://www.google.com/recaptcha/api/siteverify', [
             'secret' => $secret,
             'response' => 'kgr-test-invalid-token',
             'remoteip' => isset($_SERVER['REMOTE_ADDR']) ? (string) $_SERVER['REMOTE_ADDR'] : '',
@@ -831,12 +1007,38 @@ final class AdminController
 
     private static function is_sensitive_key(string $key): bool
     {
+        if ($key === 'jira_api_token_expires_on') {
+            return false;
+        }
         $sensitive = ['api_key', 'api_token', 'password', 'secret', 'auth', 'pass'];
         foreach ($sensitive as $word) {
             if (stripos($key, $word) !== false)
                 return true;
         }
         return false;
+    }
+
+    public static function normalize_jira_token_expiry_date(string $value): string
+    {
+        $raw = trim($value);
+        if ($raw === '') {
+            return '';
+        }
+
+        $isDate = \DateTime::createFromFormat('Y-m-d', $raw);
+        if ($isDate && $isDate->format('Y-m-d') === $raw) {
+            return $raw;
+        }
+
+        $decoded = trim(self::decrypt($raw));
+        if ($decoded !== '') {
+            $isDecodedDate = \DateTime::createFromFormat('Y-m-d', $decoded);
+            if ($isDecodedDate && $isDecodedDate->format('Y-m-d') === $decoded) {
+                return $decoded;
+            }
+        }
+
+        return '';
     }
 
     private static function should_preserve_on_empty(string $tab, string $key): bool
@@ -856,71 +1058,23 @@ final class AdminController
 
     private static function http_post_json(string $url, array $headers, string $rawBody): array
     {
-        if (!function_exists('curl_init')) {
-            return [0, 'cURL is unavailable'];
-        }
-
-        $ch = curl_init($url);
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_POST => true,
-            CURLOPT_HTTPHEADER => $headers,
-            CURLOPT_POSTFIELDS => $rawBody,
-            CURLOPT_TIMEOUT => 20,
-        ]);
-        $body = curl_exec($ch);
-        $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $error = curl_error($ch);
-        curl_close($ch);
-        if ($body === false || $error !== '') {
-            return [0, $error !== '' ? $error : 'Unknown transport error'];
-        }
-        return [$status, (string) $body];
+        return AdminHttpClient::postJson($url, $headers, $rawBody);
     }
 
     private static function http_post_form(string $url, array $data): array
     {
-        if (!function_exists('curl_init')) {
-            return [0, 'cURL is unavailable'];
-        }
-
-        $ch = curl_init($url);
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_POST => true,
-            CURLOPT_HTTPHEADER => ['Content-Type: application/x-www-form-urlencoded'],
-            CURLOPT_POSTFIELDS => http_build_query($data),
-            CURLOPT_TIMEOUT => 20,
-        ]);
-        $body = curl_exec($ch);
-        $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $error = curl_error($ch);
-        curl_close($ch);
-        if ($body === false || $error !== '') {
-            return [0, $error !== '' ? $error : 'Unknown transport error'];
-        }
-        return [$status, (string) $body];
+        return AdminHttpClient::postForm($url, $data);
     }
 
     public static function encrypt(string $value): string
     {
-        if (empty($value))
-            return '';
-        $key = defined('AUTH_KEY') ? AUTH_KEY : 'fallback_kgr_key';
-        $iv = openssl_random_pseudo_bytes(openssl_cipher_iv_length('aes-256-cbc'));
-        $encrypted = openssl_encrypt($value, 'aes-256-cbc', hash('sha256', $key, true), 0, $iv);
-        return base64_encode($iv . $encrypted);
+        return AdminCrypto::encrypt($value);
     }
 
     public static function decrypt(string $value): string
     {
-        if (empty($value))
-            return '';
-        $data = base64_decode($value);
-        $iv_len = openssl_cipher_iv_length('aes-256-cbc');
-        $iv = substr($data, 0, $iv_len);
-        $encrypted = substr($data, $iv_len);
-        $key = defined('AUTH_KEY') ? AUTH_KEY : 'fallback_kgr_key';
-        return (string) openssl_decrypt($encrypted, 'aes-256-cbc', hash('sha256', $key, true), 0, $iv);
+        return AdminCrypto::decrypt($value);
     }
 }
+
+

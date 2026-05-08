@@ -1,66 +1,13 @@
-/* global KGR_CONFIG */
+﻿/* global KGR_CONFIG */
 ( function () {
 	'use strict';
 
-	const ISSUE_TYPES = {
+	const ISSUE_TYPES = window.KGR_ISSUE_TYPES || {
 		CONTENT: 'Content change',
 		IMAGE: 'Image replacement',
 		FORM: 'Form problem',
 		PERFORMANCE: 'Performance issue',
 		OTHER: 'Other',
-	};
-	
-	window.kgrData = function() {
-		return {
-			service_type: '',
-			website_url: '',
-			email: '',
-			first_name: '',
-			last_name: '',
-			business_name: '',
-			title: '',
-			message: '',
-			attachments: [],
-			issues: [],
-			step_index: 0,
-			// Helpers to avoid WordPress smart quote issues in HTML expressions
-			shouldShowContact() {
-				return this.step_index >= 2;
-			},
-			shouldShowIssues() {
-				return this.step_index >= 3;
-			},
-			isWebsite() {
-				return this.service_type === 'Website';
-			},
-			isNotWebsite() {
-				return this.service_type !== 'Website' && this.service_type !== '';
-			},
-			hasService() {
-				return this.service_type !== '';
-			},
-			getPreviewMessage() {
-				if (!this.message) return '';
-				return this.message.substring(0, 50) + (this.message.length > 50 ? '...' : '');
-			},
-			getScreenshotCount(issue) {
-				return (issue.screenshots || []).length;
-			},
-			hasScreenshots(issue) {
-				return (issue.screenshots || []).length > 0;
-			},
-			getScreenshotLabel(issue) {
-				const count = (issue.screenshots || []).length;
-				return count + (count === 1 ? ' screenshot attached' : ' screenshots attached');
-			},
-			getIssueProblem(issue) {
-				return issue.description || '';
-			},
-			getAttachmentsLabel() {
-				const count = (this.attachments || []).length;
-				return count + (count === 1 ? ' file' : ' files');
-			}
-		};
 	};
 
 	class SupportFormUI {
@@ -99,13 +46,21 @@
 				attachments: [],
 				issues: [],
 				step_index: 0,
+				form_started_at: Math.floor( Date.now() / 1000 ),
 			};
+
+			this.turnstileWidgetId = null;
+			this.validationCache = new Map();
+			this.isInitialized = false;
 		}
 
 
 		init() {
 			const doInit = () => {
 				if ( ! this.root ) {
+					return;
+				}
+				if ( this.isInitialized ) {
 					return;
 				}
 
@@ -133,6 +88,7 @@
 				if ( ! this.form ) {
 					return;
 				}
+				this.isInitialized = true;
 				
 				if ( this.issuesContainer && this.state.issues && this.state.issues.length === 0 ) {
 					this.addIssue();
@@ -145,6 +101,8 @@
 				this.renderPreview();
 				this.renderReview();
 				this.setHelperText();
+				this.applyQaHintsVisibility();
+				this.initQaHintComponents();
 				this.initCharCounters();
 			};
 
@@ -362,7 +320,7 @@
 			this.setSubmitState( 'pending' );
 
 			try {
-				const payload = this.buildPayload();
+				const payload = await this.buildPayload();
 				console.log( '[KGR] Submitting payload:', Object.fromEntries( payload.entries() ) );
 				
 				const response = await this.request( this.config.submitRequestEndpoint, {
@@ -428,23 +386,40 @@
 			}
 
 			this.resetValidationActions();
+			const normalizedWebsite = this.normalizeUrlInput( this.state.website_url );
+			const cacheKey = normalizedWebsite.toLowerCase();
+			const cached = this.validationCache.get( cacheKey );
+			if ( cached ) {
+				if ( cached.success ) {
+					return true;
+				}
+				const cachedMsg = cached.message || this.config.i18n.websiteNotFound;
+				this.setFieldError( 'website_url', cachedMsg );
+				this.showAlert( 'error', cachedMsg );
+				this.handleWebsiteNotFound( cachedMsg );
+				return false;
+			}
 
 			try {
 				const response = await this.request( this.config.validateWebsiteEndpoint, {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
 					body: JSON.stringify( { website_url: this.state.website_url, service_type: this.state.service_type } ),
+					timeoutMs: this.config.validateRequestTimeoutMs || 12000,
 				} );
 				if ( response.success ) {
+					this.validationCache.set( cacheKey, { success: true, message: '' } );
 					return true;
 				}
 				const msg = response.message || this.config.i18n.websiteNotFound;
+				this.validationCache.set( cacheKey, { success: false, message: msg } );
 				this.setFieldError( 'website_url', msg );
 				this.showAlert( 'error', msg );
 				this.handleWebsiteNotFound( msg );
 				return false;
 			} catch ( error ) {
 				const msg = error.message || this.config.i18n.genericError;
+				this.validationCache.set( cacheKey, { success: false, message: msg } );
 				this.setFieldError( 'website_url', msg );
 				this.showAlert( 'error', msg );
 				this.handleWebsiteNotFound( msg );
@@ -860,7 +835,7 @@
 			}
 		}
 
-		buildPayload() {
+		async buildPayload() {
 			const formData = new FormData();
 			
 			// 1. Get raw data from state to bypass Alpine's Proxy system
@@ -910,6 +885,10 @@
 				( rawState.attachments || [] ).forEach( ( file ) => formData.append( 'attachments[]', file ) );
 			}
 
+			if ( window.KGRFormSecurity && typeof window.KGRFormSecurity.appendSecurityPayload === 'function' ) {
+				await window.KGRFormSecurity.appendSecurityPayload( this.form, this.config, rawState, this, formData );
+			}
+
 			return formData;
 		}
 
@@ -917,7 +896,7 @@
 			if ( ! url || url === '#' ) {
 				throw new Error( 'Configuration error: Invalid API endpoint.' );
 			}
-			const timeout = this.config.requestTimeoutMs || 25000;
+			const timeout = options && options.timeoutMs ? options.timeoutMs : ( this.config.requestTimeoutMs || 25000 );
 			const controller = new AbortController();
 			const timer = window.setTimeout( () => controller.abort(), timeout );
 			try {
@@ -1074,7 +1053,7 @@
 				return;
 			}
 			if ( mode === 'success' ) {
-				this.submitStateIcon.textContent = '✓';
+				this.submitStateIcon.textContent = 'âœ“';
 				this.submitStateTitle.textContent = 'Request submitted successfully';
 				this.submitStateMessage.textContent = message || 'We sent your request. Please check your inbox for confirmation.';
 				return;
@@ -1109,6 +1088,80 @@
 			target.querySelectorAll( '[data-non-website-file-rule]' ).forEach( ( node ) => {
 				node.textContent = this.config.i18n.nonWebsiteUploadRule || 'Accepted files up to total 10MB.';
 			} );
+		}
+
+		applyQaHintsVisibility() {
+			const enabled = !! this.config.qaHintsEnabled;
+			this.root.querySelectorAll( '[data-kgr-qa-hint]' ).forEach( ( node ) => {
+				node.classList.toggle( 'kgr-hidden', ! enabled );
+			} );
+		}
+
+		initQaHintComponents() {
+			this.root.querySelectorAll( '[data-kgr-copy-text]' ).forEach( ( node ) => {
+				if ( node.dataset.kgrCopyBound === '1' ) {
+					return;
+				}
+				node.dataset.kgrCopyBound = '1';
+				node.addEventListener( 'click', async ( event ) => {
+					event.preventDefault();
+					const text = ( node.getAttribute( 'data-kgr-copy-text' ) || '' ).trim();
+					if ( ! text ) {
+						return;
+					}
+					const copied = await this.copyTextToClipboard( text );
+					if ( copied ) {
+						this.showCopyToast( node );
+					}
+				} );
+			} );
+		}
+
+		async copyTextToClipboard( text ) {
+			try {
+				if ( navigator.clipboard && typeof navigator.clipboard.writeText === 'function' ) {
+					await navigator.clipboard.writeText( text );
+					return true;
+				}
+			} catch ( error ) {
+				// fall through to legacy method
+			}
+
+			try {
+				const ta = document.createElement( 'textarea' );
+				ta.value = text;
+				ta.setAttribute( 'readonly', 'readonly' );
+				ta.style.position = 'fixed';
+				ta.style.left = '-9999px';
+				document.body.appendChild( ta );
+				ta.select();
+				ta.setSelectionRange( 0, ta.value.length );
+				const ok = document.execCommand( 'copy' );
+				document.body.removeChild( ta );
+				return !! ok;
+			} catch ( error ) {
+				return false;
+			}
+		}
+
+		showCopyToast( node ) {
+			const toast = node.querySelector( '.kgr-qa-copy__toast' );
+			if ( ! toast ) {
+				return;
+			}
+			const label = node.getAttribute( 'data-kgr-copy-label' );
+			if ( label ) {
+				toast.textContent = label;
+			}
+			toast.classList.add( 'is-visible' );
+			toast.setAttribute( 'aria-hidden', 'false' );
+			if ( node._kgrCopyToastTimer ) {
+				window.clearTimeout( node._kgrCopyToastTimer );
+			}
+			node._kgrCopyToastTimer = window.setTimeout( () => {
+				toast.classList.remove( 'is-visible' );
+				toast.setAttribute( 'aria-hidden', 'true' );
+			}, 2000 );
 		}
 
 		renderPreview() {

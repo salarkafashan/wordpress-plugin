@@ -7,6 +7,8 @@
 
 namespace SupportRequestFrontend\Includes;
 
+use App\config\Config;
+
 if (!defined('ABSPATH')) {
 	exit;
 }
@@ -16,6 +18,12 @@ if (!defined('ABSPATH')) {
  */
 final class EnqueueSupportRequestAssets
 {
+	private static function asset_version(string $relative_path): string
+	{
+		$full_path = KGR_PLUGIN_PATH . ltrim($relative_path, '/');
+		$mtime = file_exists($full_path) ? (string) filemtime($full_path) : '';
+		return $mtime !== '' ? KGR_PLUGIN_VERSION . '.' . $mtime : KGR_PLUGIN_VERSION;
+	}
 
 	/**
 	 * Track whether assets were already enqueued.
@@ -39,7 +47,7 @@ final class EnqueueSupportRequestAssets
 			'kgr-support-request-form',
 			KGR_PLUGIN_URL . 'assets/css/support-request-form.css',
 			array(),
-			KGR_PLUGIN_VERSION
+			self::asset_version('assets/css/support-request-form.css')
 		);
 
 		wp_enqueue_script(
@@ -51,20 +59,69 @@ final class EnqueueSupportRequestAssets
 		);
 
 		wp_enqueue_script(
-			'kgr-support-request-form',
-			KGR_PLUGIN_URL . 'assets/js/support-request-form.js',
+			'kgr-support-request-form-data',
+			KGR_PLUGIN_URL . 'assets/js/support-request-form.data.js',
 			array(),
-			KGR_PLUGIN_VERSION,
+			self::asset_version('assets/js/support-request-form.data.js'),
 			true
 		);
+
+		wp_enqueue_script(
+			'kgr-support-request-form-security',
+			KGR_PLUGIN_URL . 'assets/js/support-request-form.security.js',
+			array('kgr-support-request-form-data'),
+			self::asset_version('assets/js/support-request-form.security.js'),
+			true
+		);
+
+		wp_enqueue_script(
+			'kgr-support-request-form-ui',
+			KGR_PLUGIN_URL . 'assets/js/support-request-form.ui.js',
+			array('kgr-support-request-form-data', 'kgr-support-request-form-security'),
+			self::asset_version('assets/js/support-request-form.ui.js'),
+			true
+		);
+
+		$captchaProvider = strtolower((string) Config::get('CAPTCHA_PROVIDER', 'none'));
+		$cloudflareSiteKey = trim((string) Config::get('CLOUDFLARE_TURNSTILE_SITE_KEY', ''));
+		$googleSiteKey = trim((string) Config::get('GOOGLE_RECAPTCHA_SITE_KEY', ''));
+		$settings = get_option('kgr_setting', array());
+		$general = is_array($settings) && isset($settings['general']) && is_array($settings['general']) ? $settings['general'] : array();
+		$qaHintsEnabled = isset($general['qa_hints_enabled']) && (string) $general['qa_hints_enabled'] === '1';
+
+		if ($captchaProvider === 'cloudflare' && $cloudflareSiteKey !== '') {
+			wp_enqueue_script(
+				'kgr-turnstile',
+				'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit',
+				array(),
+				null,
+				true
+			);
+		}
+		if ($captchaProvider === 'google' && $googleSiteKey !== '') {
+			wp_enqueue_script(
+				'kgr-recaptcha',
+				'https://www.google.com/recaptcha/api.js?render=' . rawurlencode($googleSiteKey),
+				array(),
+				null,
+				true
+			);
+		}
 
 		$config = array(
 			'validateWebsiteEndpoint' => home_url('/validate-website'),
 			'submitRequestEndpoint' => home_url('/submit-request'),
 			'requestTimeoutMs' => 25000,
+			'validateRequestTimeoutMs' => 12000,
 			'maxNonWebsiteUploadMb' => 10,
 			'maxIssueScreenshots' => 2,
 			'maxScreenshotMb' => 1,
+			'captchaProvider' => $captchaProvider,
+			'cloudflareSiteKey' => $cloudflareSiteKey,
+			'googleSiteKey' => $googleSiteKey,
+			'googleRecaptchaAction' => (string) Config::get('GOOGLE_RECAPTCHA_EXPECTED_ACTION', 'support_submit'),
+			'honeypotFieldName' => (string) Config::get('HONEYPOT_FIELD_NAME', 'company_website'),
+			'qaHintsEnabled' => $qaHintsEnabled,
 				'i18n' => array(
 				'next' => __('Next', 'knaguru-support'),
 				'loading' => __('Loading...', 'knaguru-support'),
@@ -88,7 +145,7 @@ final class EnqueueSupportRequestAssets
 		$config = apply_filters('kgr_frontend_config', $config);
 
 
-		wp_localize_script('kgr-support-request-form', 'KGR_CONFIG', $config);
+		wp_localize_script('kgr-support-request-form-ui', 'KGR_CONFIG', $config);
 
 		// Alpine.js recommends/requires defer in most setups
 		add_filter('script_loader_tag', function ($tag, $handle) {

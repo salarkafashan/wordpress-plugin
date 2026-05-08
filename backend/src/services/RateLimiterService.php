@@ -6,11 +6,10 @@ namespace App\services;
 
 use App\config\Config;
 use App\database\Database;
-use PDO;
 
 final class RateLimiterService
 {
-    private PDO $db;
+    private object $db;
 
     public function __construct()
     {

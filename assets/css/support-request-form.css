@@ -241,6 +241,47 @@
 	display: none;
 }
 
+.kgr-qa-copy {
+	position: relative;
+	display: inline-flex;
+	align-items: center;
+	gap: 0.25rem;
+	background: transparent;
+	border: none;
+	padding: 0;
+	margin-left: 0.2rem;
+	color: inherit;
+	cursor: pointer;
+	font: inherit;
+}
+
+.kgr-qa-copy strong {
+	font-weight: 700;
+}
+
+.kgr-qa-copy__toast {
+	position: absolute;
+	top: -30px;
+	left: 50%;
+	transform: translateX(-50%);
+	background: #111827;
+	color: #fff;
+	font-size: 0.75rem;
+	font-weight: 600;
+	padding: 0.2rem 0.45rem;
+	border-radius: 5px;
+	opacity: 0;
+	visibility: hidden;
+	transition: opacity 0.18s ease, visibility 0.18s ease;
+	white-space: nowrap;
+	pointer-events: none;
+}
+
+.kgr-qa-copy__toast.is-visible {
+	opacity: 1;
+	visibility: visible;
+}
+
 .kgr-error {
 	display: none;
 	margin-top: 0.35rem;
@@ -761,4 +802,3 @@
 		transition: max-width 0.5s ease, flex 0.5s ease, margin 0.5s ease, opacity 0.2s ease, transform 0.2s ease, visibility 0s linear 0.2s;
 	}
 }
-

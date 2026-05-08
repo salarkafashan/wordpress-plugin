@@ -36,7 +36,7 @@ final class CronController
         add_action(self::$jira_catalog_sync_hook, [__CLASS__, 'run_jira_catalog_sync']);
 
         // Keep schedule definitions aligned after deployments without requiring plugin reactivation.
-        self::ensure_event_schedule(self::$queue_hook, 'kgr_every_minute');
+        self::ensure_event_schedule(self::$queue_hook, self::get_queue_recurrence());
         self::ensure_event_schedule(self::$mapping_audit_hook, 'daily');
         self::ensure_event_schedule(self::$jira_catalog_sync_hook, 'daily');
     }
@@ -53,12 +53,13 @@ final class CronController
             wp_schedule_event(time(), 'daily', self::$cleanup_hook);
         }
 
+        $queueRecurrence = self::get_queue_recurrence();
         if (!wp_next_scheduled(self::$queue_hook)) {
-            wp_schedule_event(time(), 'kgr_every_minute', self::$queue_hook);
+            wp_schedule_event(time(), $queueRecurrence, self::$queue_hook);
         }
 
-        // Queue should run every minute for near-real-time execution.
-        self::ensure_event_schedule(self::$queue_hook, 'kgr_every_minute');
+        // Queue recurrence is configurable to reduce WP-Cron overhead on low-traffic sites.
+        self::ensure_event_schedule(self::$queue_hook, $queueRecurrence);
 
         // Requested frequency: every 24 hours for mapping audit and catalog sync.
         self::ensure_event_schedule(self::$mapping_audit_hook, 'daily');
@@ -84,7 +85,41 @@ final class CronController
                 'display' => __('Every Minute (Kanguru Support)', 'knaguru-support'),
             ];
         }
+        if (!isset($schedules['kgr_every_5_minutes'])) {
+            $schedules['kgr_every_5_minutes'] = [
+                'interval' => 300,
+                'display' => __('Every 5 Minutes (Kanguru Support)', 'knaguru-support'),
+            ];
+        }
+        if (!isset($schedules['kgr_every_15_minutes'])) {
+            $schedules['kgr_every_15_minutes'] = [
+                'interval' => 900,
+                'display' => __('Every 15 Minutes (Kanguru Support)', 'knaguru-support'),
+            ];
+        }
+        if (!isset($schedules['kgr_every_30_minutes'])) {
+            $schedules['kgr_every_30_minutes'] = [
+                'interval' => 1800,
+                'display' => __('Every 30 Minutes (Kanguru Support)', 'knaguru-support'),
+            ];
+        }
         return $schedules;
+    }
+
+    private static function get_queue_recurrence(): string
+    {
+        $default = 'kgr_every_15_minutes';
+        $settings = get_option('kgr_setting', []);
+        $saved = '';
+        if (is_array($settings) && isset($settings['general']) && is_array($settings['general'])) {
+            $saved = sanitize_key((string) ($settings['general']['queue_cron_interval'] ?? ''));
+        }
+
+        $candidate = $saved !== '' ? $saved : $default;
+        $candidate = (string) apply_filters('kgr_queue_cron_recurrence', $candidate);
+
+        $schedules = wp_get_schedules();
+        return isset($schedules[$candidate]) ? $candidate : $default;
     }
 
     private static function ensure_event_schedule(string $hook, string $recurrence): void
@@ -209,6 +244,7 @@ final class CronController
     public static function run_jira_catalog_sync(): void
     {
         try {
+            AdminController::run_jira_token_health_check('cron_daily');
             $required = Config::getRequiredJiraValues(['JIRA_BASE_URL', 'JIRA_API_USER', 'JIRA_API_TOKEN']);
             if ($required['missing'] !== []) {
                 self::logCronFailure(self::$jira_catalog_sync_hook, 'Jira catalog sync blocked: Jira settings missing', [

@@ -30,6 +30,9 @@ require_once KGR_PLUGIN_PATH . 'includes/EnqueueSupportRequestAssets.php';
 require_once KGR_PLUGIN_PATH . 'includes/ShortcodeSupportRequest.php';
 require_once KGR_PLUGIN_PATH . 'includes/DatabaseManager.php';
 require_once KGR_PLUGIN_PATH . 'includes/AdminController.php';
+require_once KGR_PLUGIN_PATH . 'includes/AdminCrypto.php';
+require_once KGR_PLUGIN_PATH . 'includes/AdminHttpClient.php';
+require_once KGR_PLUGIN_PATH . 'includes/AdminJiraCatalogService.php';
 require_once KGR_PLUGIN_PATH . 'includes/CronController.php';
 
 // 4.1 Register Admin Panel & Database Hooks
