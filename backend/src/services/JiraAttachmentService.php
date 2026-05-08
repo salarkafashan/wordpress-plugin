@@ -50,7 +50,11 @@ final class JiraAttachmentService
         curl_close($ch);
 
         if ($body === false || $error !== '' || $status < 200 || $status >= 300) {
-            throw new RuntimeException('Jira attachment upload failed: ' . ($error ?: 'HTTP ' . $status));
+            $bodySnippet = '';
+            if (is_string($body) && $body !== '') {
+                $bodySnippet = ' Response: ' . substr(trim($body), 0, 400);
+            }
+            throw new RuntimeException('Jira attachment upload failed: ' . ($error ?: 'HTTP ' . $status) . $bodySnippet);
         }
     }
 }

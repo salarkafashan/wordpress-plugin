@@ -63,45 +63,65 @@ final class QueueService
 
     public function process(array $jobTypes = [], int $limit = 25, ?array &$stats = null): void
     {
-        $jobs = $this->queueModel->claimJobs($jobTypes, $limit);
         $localStats = [
-            'claimed' => count($jobs),
+            'claimed' => 0,
             'completed' => 0,
             'retry' => 0,
             'failed' => 0,
             'errors' => [],
+            'passes' => 0,
         ];
-        foreach ($jobs as $job) {
-            $jobId = (int) $job['id'];
-            $lockToken = (string) ($job['lock_token'] ?? '');
-            try {
-                $this->executeJob($job);
-                $this->queueModel->markCompleted($jobId, $lockToken);
-                $localStats['completed']++;
-            } catch (Throwable $exception) {
-                $attempts = (int) $job['attempts'] + 1;
-                $status = $this->queueModel->markRetryOrFailed(
-                    $jobId,
-                    $lockToken,
-                    $attempts,
-                    (int) $job['max_attempts'],
-                    $exception->getMessage()
-                );
-                Logger::error('Queue job failed', ['job_id' => $jobId, 'job_type' => $job['job_type'], 'status' => $status, 'error' => $exception->getMessage()]);
-                $this->markAttachmentFailureIfNeeded((string) $job['job_type'], (string) $job['payload_json'], $status);
-                $localStats['errors'][] = [
-                    'job_id' => $jobId,
-                    'job_type' => (string) ($job['job_type'] ?? ''),
-                    'status' => $status,
-                    'error' => $exception->getMessage(),
-                ];
-                if ($status === 'failed') {
-                    $localStats['failed']++;
-                } else {
-                    $localStats['retry']++;
+
+        // Process chained jobs in the same cron run (e.g. create_jira_ticket -> attach_file_to_jira)
+        // so low-traffic sites do not wait for the next visit/cron tick.
+        $remaining = max(1, $limit);
+        $pass = 0;
+        while ($remaining > 0 && $pass < 8) {
+            $pass++;
+            $localStats['passes'] = $pass;
+            $jobs = $this->queueModel->claimJobs($jobTypes, $remaining);
+            if ($jobs === []) {
+                break;
+            }
+
+            $localStats['claimed'] += count($jobs);
+
+            foreach ($jobs as $job) {
+                $jobId = (int) $job['id'];
+                $lockToken = (string) ($job['lock_token'] ?? '');
+                try {
+                    $this->executeJob($job);
+                    $this->queueModel->markCompleted($jobId, $lockToken);
+                    $localStats['completed']++;
+                } catch (Throwable $exception) {
+                    $attempts = (int) $job['attempts'] + 1;
+                    $status = $this->queueModel->markRetryOrFailed(
+                        $jobId,
+                        $lockToken,
+                        $attempts,
+                        (int) $job['max_attempts'],
+                        $exception->getMessage()
+                    );
+                    Logger::error('Queue job failed', ['job_id' => $jobId, 'job_type' => $job['job_type'], 'status' => $status, 'error' => $exception->getMessage()]);
+                    $this->markAttachmentFailureIfNeeded((string) $job['job_type'], (string) $job['payload_json'], $status);
+                    $localStats['errors'][] = [
+                        'job_id' => $jobId,
+                        'job_type' => (string) ($job['job_type'] ?? ''),
+                        'status' => $status,
+                        'error' => $exception->getMessage(),
+                    ];
+                    if ($status === 'failed') {
+                        $localStats['failed']++;
+                    } else {
+                        $localStats['retry']++;
+                    }
+                    if ($status === 'failed') {
+                        $this->notifyAdminFailure($job, $exception->getMessage());
+                    }
                 }
-                if ($status === 'failed') {
-                    $this->notifyAdminFailure($job, $exception->getMessage());
+                $remaining--;
+                if ($remaining <= 0) {
+                    break;
                 }
             }
         }
@@ -470,10 +490,9 @@ final class QueueService
             if ($relativePath === '') {
                 continue;
             }
-            $link = $baseUrl !== '' ? $baseUrl . '/' . ltrim($relativePath, '/') : $relativePath;
-            $html .= '<li style="margin-bottom:6px;"><a href="' . htmlspecialchars($link, ENT_QUOTES, 'UTF-8') . '" style="color:#00001A;">' .
+            $html .= '<li style="margin-bottom:6px;">' .
                 htmlspecialchars((string) ($attachment['original_name'] ?? 'file'), ENT_QUOTES, 'UTF-8') .
-                '</a></li>';
+                '</li>';
         }
         if ($hasLinks) {
             $html .= '</ul>';

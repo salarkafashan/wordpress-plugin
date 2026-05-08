@@ -145,7 +145,16 @@ final class SupportRequestService
         $publicId = strtoupper(bin2hex(random_bytes(6)));
         $baseUrl = (string) ($payload['_app_base_url'] ?? \App\config\Config::get('APP_BASE_URL', ''));
         $baseUrl = rtrim($baseUrl, '/');
-        $confirmationUrl = $baseUrl . '/public/confirm.php?token=' . urlencode($token);
+        $confirmationUrl = $baseUrl . '/?kgr_api=confirm&token=' . urlencode($token);
+        if (function_exists('home_url')) {
+            $confirmationUrl = add_query_arg(
+                [
+                    'kgr_api' => 'confirm',
+                    'token' => $token,
+                ],
+                (string) home_url('/')
+            );
+        }
         $returnPageUrl = trim((string) ($payload['return_page_url'] ?? ''));
         if ($returnPageUrl !== '' && filter_var($returnPageUrl, FILTER_VALIDATE_URL) !== false) {
             $glue = strpos($returnPageUrl, '?') !== false ? '&' : '?';
@@ -278,25 +287,18 @@ final class SupportRequestService
         try {
             $this->requestModel->updateStatus((int) $request['id'], 'confirmed');
             $this->queueService->enqueue('create_jira_ticket', (int) $request['id']);
-
-            // Cron-safe fallback: attempt one immediate queue pass so Jira ticket creation
-            // does not depend entirely on WP-Cron availability.
-            try {
-                $this->queueService->process([], 25);
-            } catch (Throwable $queueException) {
-                Logger::error('Support confirm queue fallback process failed', [
-                    'request_id' => (int) $request['id'],
-                    'public_id' => (string) ($request['public_id'] ?? ''),
-                    'error' => $queueException->getMessage(),
-                ]);
-            }
+            $this->triggerQueueProcessingAsync();
 
             Logger::info('Support confirm completed', [
                 'request_id' => (int) $request['id'],
                 'public_id' => (string) ($request['public_id'] ?? ''),
                 'queue_job' => 'create_jira_ticket',
             ]);
-            return ['success' => true, 'message' => 'Support request confirmed. Ticket creation is now queued.'];
+            return [
+                'success' => true,
+                'message' => 'Support request confirmed. Ticket creation is now queued.',
+                'request_id' => (int) $request['id'],
+            ];
         } catch (Throwable $exception) {
             Logger::error('Support confirm failed during persistence/queue', [
                 'request_id' => (int) $request['id'],
@@ -305,6 +307,51 @@ final class SupportRequestService
             ]);
             return ['success' => false, 'message' => 'Could not finalize confirmation. Please contact support.'];
         }
+    }
+
+    private function triggerQueueProcessingAsync(): void
+    {
+        if (!function_exists('wp_remote_post') || !function_exists('home_url')) {
+            return;
+        }
+
+        // Fire WP-Cron in background so confirmation stays fast while queue keeps moving.
+        $cronUrl = add_query_arg(
+            ['doing_wp_cron' => sprintf('%.22F', microtime(true))],
+            home_url('/wp-cron.php')
+        );
+
+        wp_remote_post($cronUrl, [
+            'timeout' => 0.01,
+            'blocking' => false,
+            'sslverify' => apply_filters('https_local_ssl_verify', false),
+        ]);
+    }
+
+    private function processCriticalQueueNow(): void
+    {
+        try {
+            // Keep confirmation reasonably responsive while guaranteeing core workflow
+            // on environments where WP-Cron is unreliable (low-traffic websites).
+            // This includes the attachment pipeline so Jira receives actual files.
+            $this->queueService->process([
+                'create_jira_ticket',
+                'send_ticket_created_email',
+                'optimize_attachment',
+                'move_attachment_to_local_storage',
+                'attach_file_to_jira',
+                'cleanup_temp_file',
+            ], 20);
+        } catch (Throwable $queueException) {
+            Logger::error('Support confirm critical queue fallback failed', [
+                'error' => $queueException->getMessage(),
+            ]);
+        }
+    }
+
+    public function processPostConfirmQueue(): void
+    {
+        $this->processCriticalQueueNow();
     }
 
     public function queuePendingMaintenance(): array

@@ -186,7 +186,7 @@
 			}
 			if ( input.id === 'KGR_non_website_files' ) {
 				this.state.attachments = Array.from( input.files || [] );
-				this.renderFileList( input.closest( '.kgr-upload' ), this.state.attachments, 'No files selected yet.' );
+				this.renderFileList( input.closest( '.kgr-upload' ), this.state.attachments, 'No files selected yet.', input );
 			}
 
 			if ( input.hasAttribute( 'data-issue-field' ) ) {
@@ -195,7 +195,7 @@
 				const field = input.getAttribute( 'data-issue-field' );
 				if ( field === 'screenshots' ) {
 					this.state.issues[ index ][ field ] = Array.from( input.files || [] );
-					this.renderFileList( input.closest( '.kgr-upload' ), this.state.issues[ index ].screenshots, 'No screenshots selected yet.' );
+					this.renderFileList( input.closest( '.kgr-upload' ), this.state.issues[ index ].screenshots, 'No screenshots selected yet.', input );
 				} else {
 					this.state.issues[ index ][ field ] = input.value.trim();
 					if ( field === 'issue_type' ) {
@@ -610,10 +610,6 @@
 				}
 				if ( invalidSize ) {
 					this.setIssueError( index, 'screenshots', `Each screenshot must be under ${ this.config.maxScreenshotMb || 1 }MB.` );
-					valid = false;
-				}
-				if ( issue.issue_type === ISSUE_TYPES.FORM && shots.length === 0 ) {
-					this.setIssueError( index, 'screenshots', 'Screenshot is required for form problems.' );
 					valid = false;
 				}
 			} );
@@ -1053,7 +1049,7 @@
 				return;
 			}
 			if ( mode === 'success' ) {
-				this.submitStateIcon.textContent = 'âœ“';
+				this.submitStateIcon.textContent = '\u2713';
 				this.submitStateTitle.textContent = 'Request submitted successfully';
 				this.submitStateMessage.textContent = message || 'We sent your request. Please check your inbox for confirmation.';
 				return;
@@ -1063,21 +1059,115 @@
 			this.submitStateMessage.textContent = message || this.config.i18n.genericError;
 		}
 
-		renderFileList( uploadWrap, files, emptyText ) {
+		renderFileList( uploadWrap, files, emptyText, input = null ) {
 			if ( ! uploadWrap ) {
 				return;
 			}
+			const previewBox = uploadWrap.querySelector( '[data-preview-container]' );
 			const output = uploadWrap.querySelector( '[data-file-list]' );
-			if ( ! output ) {
+
+			if ( output ) {
+				if ( ! files.length ) {
+					output.textContent = emptyText;
+				} else {
+					const names = files.slice( 0, 3 ).map( ( file ) => file.name );
+					const suffix = files.length > 3 ? ` +${ files.length - 3 } more` : '';
+					output.textContent = `${ files.length } file(s): ${ names.join( ', ' ) }${ suffix }`;
+				}
+			}
+
+			if ( ! previewBox ) {
 				return;
 			}
+
+			previewBox.innerHTML = '';
 			if ( ! files.length ) {
-				output.textContent = emptyText;
 				return;
 			}
-			const names = files.slice( 0, 3 ).map( ( file ) => file.name );
-			const suffix = files.length > 3 ? ` +${ files.length - 3 } more` : '';
-			output.textContent = `${ files.length } file(s): ${ names.join( ', ' ) }${ suffix }`;
+
+			previewBox.style.display = 'flex';
+			previewBox.style.flexWrap = 'wrap';
+			previewBox.style.gap = '10px';
+			previewBox.style.marginTop = '10px';
+
+			files.forEach( ( file, fileIndex ) => {
+				const item = document.createElement( 'div' );
+				item.style.position = 'relative';
+				item.style.width = '88px';
+				item.style.height = '88px';
+				item.style.border = '1px solid #e2e8f0';
+				item.style.borderRadius = '8px';
+				item.style.background = '#f8fafc';
+				item.style.overflow = 'hidden';
+				item.style.display = 'flex';
+				item.style.alignItems = 'center';
+				item.style.justifyContent = 'center';
+
+				const removeBtn = document.createElement( 'button' );
+				removeBtn.type = 'button';
+				removeBtn.setAttribute( 'aria-label', `Remove ${ file.name }` );
+				removeBtn.textContent = '×';
+				removeBtn.style.position = 'absolute';
+				removeBtn.style.top = '6px';
+				removeBtn.style.right = '6px';
+				removeBtn.style.width = '20px';
+				removeBtn.style.height = '20px';
+				removeBtn.style.border = 'none';
+				removeBtn.style.borderRadius = '50%';
+				removeBtn.style.background = '#dc2626';
+				removeBtn.style.color = '#ffffff';
+				removeBtn.style.cursor = 'pointer';
+				removeBtn.style.fontSize = '16px';
+				removeBtn.style.fontWeight = '700';
+				removeBtn.style.lineHeight = '18px';
+				removeBtn.style.padding = '0';
+				removeBtn.style.zIndex = '2';
+
+				removeBtn.addEventListener( 'click', () => {
+					files.splice( fileIndex, 1 );
+					this.syncInputFilesFromArray( input, files );
+					this.renderFileList( uploadWrap, files, emptyText, input );
+					this.clearAlert();
+					this.renderPreview();
+					this.renderReview();
+				} );
+
+				if ( file.type && file.type.startsWith( 'image/' ) ) {
+					const img = document.createElement( 'img' );
+					img.src = URL.createObjectURL( file );
+					img.alt = file.name;
+					img.style.width = '100%';
+					img.style.height = '100%';
+					img.style.objectFit = 'cover';
+					item.appendChild( img );
+				} else {
+					const ext = ( file.name.split( '.' ).pop() || 'FILE' ).toUpperCase();
+					const extLabel = document.createElement( 'span' );
+					extLabel.textContent = ext;
+					extLabel.style.fontSize = '12px';
+					extLabel.style.fontWeight = '700';
+					extLabel.style.color = '#334155';
+					item.appendChild( extLabel );
+				}
+
+				item.appendChild( removeBtn );
+				previewBox.appendChild( item );
+			} );
+		}
+
+		syncInputFilesFromArray( input, files ) {
+			if ( ! input ) {
+				return;
+			}
+			try {
+				const dt = new DataTransfer();
+				files.forEach( ( file ) => dt.items.add( file ) );
+				input.files = dt.files;
+			} catch ( error ) {
+				if ( files.length === 0 ) {
+					input.value = '';
+				}
+			}
 		}
 
 		setHelperText( scope ) {

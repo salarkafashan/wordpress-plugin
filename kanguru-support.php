@@ -51,10 +51,15 @@ add_action('plugins_loaded', function () {
 register_activation_hook(KGR_PLUGIN_FILE, function () {
 	\SupportRequestFrontend\Includes\DatabaseManager::install();
 	\SupportRequestFrontend\Includes\CronController::schedule_events();
+	add_rewrite_rule('^validate-website/?$', 'index.php?kgr_api=validate', 'top');
+	add_rewrite_rule('^submit-request/?$', 'index.php?kgr_api=submit', 'top');
+	add_rewrite_rule('^confirm-request/?$', 'index.php?kgr_api=confirm', 'top');
+	flush_rewrite_rules();
 });
 
 register_deactivation_hook(KGR_PLUGIN_FILE, function () {
 	\SupportRequestFrontend\Includes\CronController::clear_events();
+	flush_rewrite_rules();
 });
 
 // 5. Register the Shortcode [support_request_form]
@@ -72,6 +77,7 @@ add_filter('no_texturize_shortcodes', function ($shortcodes) {
 add_action('init', function () {
 	add_rewrite_rule('^validate-website/?$', 'index.php?kgr_api=validate', 'top');
 	add_rewrite_rule('^submit-request/?$', 'index.php?kgr_api=submit', 'top');
+	add_rewrite_rule('^confirm-request/?$', 'index.php?kgr_api=confirm', 'top');
 });
 
 add_filter('query_vars', function ($vars) {
@@ -93,6 +99,14 @@ add_action('template_redirect', function () {
 
 	if ($api_action === 'submit') {
 		$file = KGR_BACKEND_PATH . 'public/submit-request.php';
+		if (file_exists($file)) {
+			require_once $file;
+			exit;
+		}
+	}
+
+	if ($api_action === 'confirm') {
+		$file = KGR_BACKEND_PATH . 'public/confirm.php';
 		if (file_exists($file)) {
 			require_once $file;
 			exit;

@@ -71,8 +71,8 @@ $stats = \SupportRequestFrontend\Includes\AdminController::get_dashboard_stats()
                     <th>Client / Company</th>
                     <th>Sender Info</th>
                     <th>Issue Type</th>
-                    <th @click="sort('priority')" style="cursor:pointer">Priority <i class="dashicons"
-                            :class="getSortIcon('priority')"></i></th>
+                    <th>Status</th>
+                    <th>Priority</th>
                     <th @click="sort('created_at')" style="cursor:pointer">Created <i class="dashicons"
                             :class="getSortIcon('created_at')"></i></th>
                     <th>Action</th>
@@ -94,8 +94,11 @@ $stats = \SupportRequestFrontend\Includes\AdminController::get_dashboard_stats()
                             <span x-text="t.issue_type"></span>
                         </td>
                         <td>
-                            <span class="kgr-badge" :class="'kgr-badge--' + (t.priority || 'medium')"
-                                x-text="t.priority || 'medium'"></span>
+                            <span class="kgr-status-pill" x-text="t.status || 'pending'"></span>
+                        </td>
+                        <td>
+                            <span class="kgr-badge" :class="'kgr-badge--' + priorityClass(t.priority)"
+                                x-text="formatPriority(t.priority)"></span>
                         </td>
                         <td x-text="formatDate(t.created_at)"></td>
                         <td>
@@ -180,7 +183,7 @@ $stats = \SupportRequestFrontend\Includes\AdminController::get_dashboard_stats()
                         <div class="kgr-panel-section">
                             <h4>Status & Jira</h4>
                             <div class="kgr-data-row">
-                                <div class="kgr-data-label">Local Status</div>
+                                <div class="kgr-data-label">Support Status</div>
                                 <div class="kgr-data-value"><span class="kgr-status-pill"
                                         x-text="detailData.request.status"></span></div>
                             </div>
@@ -327,6 +330,20 @@ $stats = \SupportRequestFrontend\Includes\AdminController::get_dashboard_stats()
                 return new Date(dateStr).toLocaleDateString('en-US', {
                     month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
                 });
+            },
+
+            formatPriority(raw) {
+                const value = String(raw || '').toLowerCase().trim();
+                if (value === 'high' || value.includes('critical') || value.includes('urgent')) return 'High';
+                if (value === 'low' || value.includes('minor') || value.includes('small')) return 'Low';
+                return 'Medium';
+            },
+
+            priorityClass(raw) {
+                const value = String(raw || '').toLowerCase().trim();
+                if (value === 'high' || value.includes('critical') || value.includes('urgent')) return 'high';
+                if (value === 'low' || value.includes('minor') || value.includes('small')) return 'low';
+                return 'medium';
             }
         }));
     });
