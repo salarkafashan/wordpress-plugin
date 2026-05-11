@@ -145,6 +145,8 @@ final class CaptchaService
         $siteKey = trim((string) Config::get('GOOGLE_RECAPTCHA_ENTERPRISE_SITE_KEY'));
         $projectId = trim((string) Config::get('GOOGLE_RECAPTCHA_ENTERPRISE_PROJECT_ID'));
         $apiKey = trim((string) Config::get('GOOGLE_RECAPTCHA_ENTERPRISE_API_KEY'));
+        $expectedAction = 'submit'; // Force exactly 'submit' for Enterprise
+
         if ($siteKey === '' || $projectId === '' || $apiKey === '') {
             return [
                 'success' => false,
@@ -154,40 +156,76 @@ final class CaptchaService
             ];
         }
 
-        $expectedAction = (string) Config::get('GOOGLE_RECAPTCHA_EXPECTED_ACTION', 'submit');
-        $response = $this->postJson(
-            'https://recaptchaenterprise.googleapis.com/v1/projects/' . rawurlencode($projectId) . '/assessments?key=' . rawurlencode($apiKey),
-            [
+        $url = 'https://recaptchaenterprise.googleapis.com/v1/projects/' . rawurlencode($projectId) . '/assessments?key=' . rawurlencode($apiKey);
+
+        Logger::info('Preparing Google reCAPTCHA Enterprise assessment request', [
+            'google_type' => 'enterprise',
+            'project_id' => $projectId,
+            'enterprise_site_key_last_6' => substr($siteKey, -6),
+            'api_key_last_6' => substr($apiKey, -6),
+            'token_length' => strlen($token),
+            'expected_action' => $expectedAction,
+        ]);
+
+        $response = wp_remote_post($url, [
+            'headers' => [
+                'Content-Type' => 'application/json; charset=utf-8',
+            ],
+            'body' => wp_json_encode([
                 'event' => [
                     'token' => $token,
                     'siteKey' => $siteKey,
                     'expectedAction' => $expectedAction,
-                    'userAgent' => (string) ($_SERVER['HTTP_USER_AGENT'] ?? ''),
-                    'userIpAddress' => $ip,
                 ],
-            ]
-        );
+            ]),
+            'timeout' => (int) Config::get('CAPTCHA_VERIFY_TIMEOUT', 10),
+        ]);
 
-        if (isset($response['error']) && is_array($response['error'])) {
-            Logger::info('Google enterprise captcha verify result', [
-                'valid' => null,
-                'invalid_reason' => $response['error']['status'] ?? null,
-                'action' => null,
-                'hostname' => null,
-                'score' => null,
-                'reasons' => [],
-            ]);
+        if (is_wp_error($response)) {
+            Logger::error('Google reCAPTCHA Enterprise request failed', ['error' => $response->get_error_message()]);
             return [
                 'success' => false,
                 'provider' => 'google',
-                'message' => $this->googleEnterpriseApiErrorMessage($response['error']),
-                'errors' => [(string) ($response['error']['status'] ?? 'enterprise-api-error')],
+                'message' => 'Captcha verification service could not be reached. Please try again.',
+                'errors' => ['request-failed'],
             ];
         }
 
-        $tokenProperties = is_array($response['tokenProperties'] ?? null) ? $response['tokenProperties'] : [];
-        $riskAnalysis = is_array($response['riskAnalysis'] ?? null) ? $response['riskAnalysis'] : [];
-        Logger::info('Google enterprise captcha verify result', [
+        $body = wp_remote_retrieve_body($response);
+        $status = wp_remote_retrieve_response_code($response);
+        $decoded = json_decode((string) $body, true);
+
+        if ($status < 200 || $status >= 300 || (isset($decoded['error']) && is_array($decoded['error']))) {
+            $err = is_array($decoded['error'] ?? null) ? $decoded['error'] : [];
+            Logger::error('Google reCAPTCHA Enterprise API error response', [
+                'http_status' => $status,
+                'code' => $err['code'] ?? null,
+                'message' => $err['message'] ?? null,
+                'status' => $err['status'] ?? null,
+                'details' => $err['details'] ?? null,
+            ]);
+
+            return [
+                'success' => false,
+                'provider' => 'google',
+                'message' => $this->googleEnterpriseApiErrorMessage($err),
+                'errors' => [(string) ($err['status'] ?? 'enterprise-api-error')],
+            ];
+        }
+
+        if (!is_array($decoded)) {
+            return [
+                'success' => false,
+                'provider' => 'google',
+                'message' => 'Invalid response from Google reCAPTCHA Enterprise.',
+                'errors' => ['invalid-response'],
+            ];
+        }
+
+        $tokenProperties = is_array($decoded['tokenProperties'] ?? null) ? $decoded['tokenProperties'] : [];
+        $riskAnalysis = is_array($decoded['riskAnalysis'] ?? null) ? $decoded['riskAnalysis'] : [];
+
+        Logger::info('Google reCAPTCHA Enterprise verify result', [
             'valid' => $tokenProperties['valid'] ?? null,
             'invalid_reason' => $tokenProperties['invalidReason'] ?? null,
             'action' => $tokenProperties['action'] ?? null,
@@ -195,6 +233,7 @@ final class CaptchaService
             'score' => $riskAnalysis['score'] ?? null,
             'reasons' => $riskAnalysis['reasons'] ?? [],
         ]);
+
         if (empty($tokenProperties['valid'])) {
             $reason = (string) ($tokenProperties['invalidReason'] ?? 'invalid-input-response');
             return [
@@ -295,41 +334,5 @@ final class CaptchaService
         return is_array($decoded) ? $decoded : ['success' => false, 'error-codes' => ['captcha-invalid-response']];
     }
 
-    private function postJson(string $url, array $data): array
-    {
-        $timeout = (int) Config::get('CAPTCHA_VERIFY_TIMEOUT', 10);
-        $body = json_encode($data, JSON_UNESCAPED_SLASHES);
-        if (!is_string($body)) {
-            return ['error' => ['status' => 'INVALID_ARGUMENT']];
-        }
 
-        $ch = curl_init($url);
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_POST => true,
-            CURLOPT_POSTFIELDS => $body,
-            CURLOPT_HTTPHEADER => ['Content-Type: application/json; charset=utf-8'],
-            CURLOPT_TIMEOUT => $timeout,
-        ]);
-        $responseBody = curl_exec($ch);
-        $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $error = curl_error($ch);
-        curl_close($ch);
-
-        if ($responseBody === false || $error !== '') {
-            return ['error' => ['status' => 'captcha-request-failed']];
-        }
-
-        $decoded = json_decode((string) $responseBody, true);
-        if (!is_array($decoded)) {
-            return ['error' => ['status' => 'captcha-invalid-response']];
-        }
-        if ($status < 200 || $status >= 300) {
-            return isset($decoded['error']) && is_array($decoded['error'])
-                ? $decoded
-                : ['error' => ['status' => 'enterprise-api-error']];
-        }
-
-        return $decoded;
-    }
 }

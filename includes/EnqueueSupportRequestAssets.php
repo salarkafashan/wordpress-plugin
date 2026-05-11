@@ -131,7 +131,7 @@ final class EnqueueSupportRequestAssets
 			'cloudflareSiteKey' => $cloudflareSiteKey,
 			'googleSiteKey' => $googleSiteKey,
 			'googleRecaptchaType' => $googleRecaptchaType,
-			'googleRecaptchaAction' => (string) Config::get('GOOGLE_RECAPTCHA_EXPECTED_ACTION', 'submit'),
+			'googleRecaptchaAction' => $googleRecaptchaType === 'enterprise' ? 'submit' : (string) Config::get('GOOGLE_RECAPTCHA_EXPECTED_ACTION', 'submit'),
 			'honeypotFieldName' => (string) Config::get('HONEYPOT_FIELD_NAME', 'company_website'),
 			'qaHintsEnabled' => $qaHintsEnabled,
 				'i18n' => array(
