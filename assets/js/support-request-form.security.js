@@ -4,17 +4,24 @@
 
 	async function getGoogleCaptchaToken( config ) {
 		const siteKey = ( config.googleSiteKey || '' ).toString().trim();
-		const action = ( config.googleRecaptchaAction || 'support_submit' ).toString();
+		const action = ( config.googleRecaptchaAction || 'submit' ).toString();
+		const type = ( config.googleRecaptchaType || 'classic' ).toString().toLowerCase();
 		if ( ! siteKey ) {
 			throw new Error( 'Google reCAPTCHA is not configured.' );
 		}
-		if ( ! window.grecaptcha || typeof window.grecaptcha.execute !== 'function' ) {
+		if ( ! window.grecaptcha ) {
 			throw new Error( 'Google reCAPTCHA is unavailable. Please refresh and try again.' );
 		}
+
+		const recaptcha = type === 'enterprise' ? window.grecaptcha.enterprise : window.grecaptcha;
+		if ( ! recaptcha || typeof recaptcha.execute !== 'function' || typeof recaptcha.ready !== 'function' ) {
+			throw new Error( 'Google reCAPTCHA is unavailable. Please refresh and try again.' );
+		}
+
 		return new Promise( ( resolve, reject ) => {
-			window.grecaptcha.ready( async () => {
+			recaptcha.ready( async () => {
 				try {
-					const token = await window.grecaptcha.execute( siteKey, { action } );
+					const token = await recaptcha.execute( siteKey, { action } );
 					resolve( token || '' );
 				} catch ( error ) {
 					reject( new Error( 'Google reCAPTCHA validation failed. Please try again.' ) );

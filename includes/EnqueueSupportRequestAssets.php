@@ -58,6 +58,35 @@ final class EnqueueSupportRequestAssets
 			false
 		);
 
+		$captchaProvider = strtolower((string) Config::get('CAPTCHA_PROVIDER', 'none'));
+		$cloudflareSiteKey = trim((string) Config::get('CLOUDFLARE_TURNSTILE_SITE_KEY', ''));
+		$googleRecaptchaType = strtolower(trim((string) Config::get('GOOGLE_RECAPTCHA_TYPE', 'classic')));
+		$googleSiteKey = $googleRecaptchaType === 'enterprise'
+			? trim((string) Config::get('GOOGLE_RECAPTCHA_ENTERPRISE_SITE_KEY', ''))
+			: trim((string) Config::get('GOOGLE_RECAPTCHA_SITE_KEY', ''));
+
+		if ($captchaProvider === 'cloudflare' && $cloudflareSiteKey !== '') {
+			wp_enqueue_script(
+				'kgr-turnstile',
+				'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit',
+				array(),
+				null,
+				true
+			);
+		}
+		if ($captchaProvider === 'google' && $googleSiteKey !== '') {
+			$googleScript = $googleRecaptchaType === 'enterprise'
+				? 'https://www.google.com/recaptcha/enterprise.js?render=' . rawurlencode($googleSiteKey)
+				: 'https://www.google.com/recaptcha/api.js?render=' . rawurlencode($googleSiteKey);
+			wp_enqueue_script(
+				'kgr-recaptcha',
+				$googleScript,
+				array(),
+				null,
+				true
+			);
+		}
+
 		wp_enqueue_script(
 			'kgr-support-request-form-data',
 			KGR_PLUGIN_URL . 'assets/js/support-request-form.data.js',
@@ -69,7 +98,11 @@ final class EnqueueSupportRequestAssets
 		wp_enqueue_script(
 			'kgr-support-request-form-security',
 			KGR_PLUGIN_URL . 'assets/js/support-request-form.security.js',
-			array('kgr-support-request-form-data'),
+			array_values(array_filter(array(
+				'kgr-support-request-form-data',
+				$captchaProvider === 'google' && $googleSiteKey !== '' ? 'kgr-recaptcha' : '',
+				$captchaProvider === 'cloudflare' && $cloudflareSiteKey !== '' ? 'kgr-turnstile' : '',
+			))),
 			self::asset_version('assets/js/support-request-form.security.js'),
 			true
 		);
@@ -82,31 +115,9 @@ final class EnqueueSupportRequestAssets
 			true
 		);
 
-		$captchaProvider = strtolower((string) Config::get('CAPTCHA_PROVIDER', 'none'));
-		$cloudflareSiteKey = trim((string) Config::get('CLOUDFLARE_TURNSTILE_SITE_KEY', ''));
-		$googleSiteKey = trim((string) Config::get('GOOGLE_RECAPTCHA_SITE_KEY', ''));
 		$settings = get_option('kgr_setting', array());
 		$general = is_array($settings) && isset($settings['general']) && is_array($settings['general']) ? $settings['general'] : array();
 		$qaHintsEnabled = isset($general['qa_hints_enabled']) && (string) $general['qa_hints_enabled'] === '1';
-
-		if ($captchaProvider === 'cloudflare' && $cloudflareSiteKey !== '') {
-			wp_enqueue_script(
-				'kgr-turnstile',
-				'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit',
-				array(),
-				null,
-				true
-			);
-		}
-		if ($captchaProvider === 'google' && $googleSiteKey !== '') {
-			wp_enqueue_script(
-				'kgr-recaptcha',
-				'https://www.google.com/recaptcha/api.js?render=' . rawurlencode($googleSiteKey),
-				array(),
-				null,
-				true
-			);
-		}
 
 		$config = array(
 			'validateWebsiteEndpoint' => home_url('/validate-website'),
@@ -119,7 +130,8 @@ final class EnqueueSupportRequestAssets
 			'captchaProvider' => $captchaProvider,
 			'cloudflareSiteKey' => $cloudflareSiteKey,
 			'googleSiteKey' => $googleSiteKey,
-			'googleRecaptchaAction' => (string) Config::get('GOOGLE_RECAPTCHA_EXPECTED_ACTION', 'support_submit'),
+			'googleRecaptchaType' => $googleRecaptchaType,
+			'googleRecaptchaAction' => (string) Config::get('GOOGLE_RECAPTCHA_EXPECTED_ACTION', 'submit'),
 			'honeypotFieldName' => (string) Config::get('HONEYPOT_FIELD_NAME', 'company_website'),
 			'qaHintsEnabled' => $qaHintsEnabled,
 				'i18n' => array(

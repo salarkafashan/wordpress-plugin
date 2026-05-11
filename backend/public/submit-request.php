@@ -8,6 +8,7 @@ use App\helpers\Http;
 use App\helpers\Logger;
 use App\helpers\Security;
 use App\helpers\Validator;
+use App\config\Config;
 use App\services\CaptchaService;
 use App\services\HoneypotService;
 use App\services\RateLimiterService;
@@ -112,6 +113,15 @@ try {
         Http::json(['success' => false, 'message' => $honeypot['message'] ?? 'Spam validation failed.'], 422);
         exit;
     }
+
+    Logger::info('Captcha submit diagnostics', [
+        'trace_id' => $traceId,
+        'provider' => Config::get('CAPTCHA_PROVIDER', 'none'),
+        'google_type' => Config::get('GOOGLE_RECAPTCHA_TYPE', 'classic'),
+        'has_captcha_token' => !empty($payload['captcha_token'] ?? null),
+        'has_g_recaptcha_response' => !empty($payload['g-recaptcha-response'] ?? null),
+        'token_length' => strlen((string) ($payload['captcha_token'] ?? $payload['g-recaptcha-response'] ?? '')),
+    ]);
 
     $captcha = (new CaptchaService())->verify($payload, $ip, 'submit');
     if (empty($captcha['success'])) {

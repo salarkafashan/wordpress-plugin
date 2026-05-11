@@ -23,6 +23,8 @@ $has_cf_site_key = !empty($settings['captcha']['cloudflare_turnstile_site_key'])
 $has_cf_secret = !empty($settings['captcha']['cloudflare_turnstile_secret_key']);
 $has_google_site_key = !empty($settings['captcha']['google_recaptcha_site_key']);
 $has_google_secret = !empty($settings['captcha']['google_recaptcha_secret_key']);
+$has_google_enterprise_site_key = !empty($settings['captcha']['google_recaptcha_enterprise_site_key']);
+$has_google_enterprise_api_key = !empty($settings['captcha']['google_recaptcha_enterprise_api_key']);
 $jira_token_expires_on_raw = (string) ($settings['jira']['jira_api_token_expires_on'] ?? '');
 $jira_token_expires_on = \SupportRequestFrontend\Includes\AdminController::normalize_jira_token_expiry_date($jira_token_expires_on_raw);
 $jira_token_health = get_option('kgr_jira_token_health', []);
@@ -349,26 +351,34 @@ if ($jira_days_left === null && $jira_token_expires_on !== '') {
                         </div>
 
                         <div style="border: 1px solid lightgray; padding:10px; border-radius:8px; margin-top: 1rem;">
-                            <h4 style="margin-top:1.5rem">Google reCAPTCHA v3</h4>
+                            <h4 style="margin-top:1.5rem">Google reCAPTCHA</h4>
                             <div class="kgr-admin-help" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
                                 <button type="button" class="kgr-btn" :disabled="testingGoogle" @click="testGoogleCredentials()">
                                     <span x-show="!testingGoogle">Test Google Keys</span>
                                     <span x-show="testingGoogle">Testing...</span>
                                 </button>
                             </div>
+                            <div class="kgr-admin-field">
+                                <label>Google reCAPTCHA Type</label>
+                                <select name="captcha[google_recaptcha_type]" x-model="googleRecaptchaType">
+                                    <option value="classic" <?php selected($settings['captcha']['google_recaptcha_type'] ?? 'classic', 'classic'); ?>>Classic reCAPTCHA v3</option>
+                                    <option value="enterprise" <?php selected($settings['captcha']['google_recaptcha_type'] ?? 'classic', 'enterprise'); ?>>reCAPTCHA Enterprise</option>
+                                </select>
+                                <p class="kgr-admin-help">Classic and Enterprise credentials are not interchangeable. Choose the type that matches the keys created in Google.</p>
+                            </div>
                             <div class="kgr-admin-grid" style="grid-template-columns: 1fr 1fr; gap: 10px;">
-                                <div class="kgr-admin-field">
-                                    <label>Site Key</label>
+                                <div class="kgr-admin-field" x-show="googleRecaptchaType === 'classic'">
+                                    <label>Classic Site Key</label>
                                     <div class="kgr-admin-help" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
                                         <span x-text="credentialStatus('google_recaptcha_site_key', <?php echo $has_google_site_key ? 'true' : 'false'; ?>)"></span>
                                         <button type="button" class="kgr-btn" @click="toggleCredentialEdit('google_recaptcha_site_key')">
                                             <span x-text="credentialEditing.google_recaptcha_site_key ? 'Cancel' : 'Replace key'"></span>
                                         </button>
                                     </div>
-                                    <input type="text" name="captcha[google_recaptcha_site_key]" x-show="credentialEditing.google_recaptcha_site_key" value="" placeholder="Enter a new Google site key">
+                                    <input type="text" name="captcha[google_recaptcha_site_key]" x-show="credentialEditing.google_recaptcha_site_key" value="" placeholder="Enter a new Classic site key">
                                 </div>
-                                <div class="kgr-admin-field">
-                                    <label>Secret Key</label>
+                                <div class="kgr-admin-field" x-show="googleRecaptchaType === 'classic'">
+                                    <label>Classic Secret Key</label>
                                     <div class="kgr-admin-help" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
                                         <span x-text="credentialStatus('google_recaptcha_secret_key', <?php echo $has_google_secret ? 'true' : 'false'; ?>)"></span>
                                         <button type="button" class="kgr-btn" @click="toggleCredentialEdit('google_recaptcha_secret_key')">
@@ -376,6 +386,32 @@ if ($jira_days_left === null && $jira_token_expires_on !== '') {
                                         </button>
                                     </div>
                                     <input type="password" name="captcha[google_recaptcha_secret_key]" x-show="credentialEditing.google_recaptcha_secret_key" value="" autocomplete="new-password" placeholder="Enter a new Google secret key">
+                                </div>
+                                <div class="kgr-admin-field" x-show="googleRecaptchaType === 'enterprise'">
+                                    <label>Enterprise Project ID</label>
+                                    <input type="text" name="captcha[google_recaptcha_enterprise_project_id]"
+                                        value="<?php echo esc_attr($settings['captcha']['google_recaptcha_enterprise_project_id'] ?? ''); ?>"
+                                        placeholder="kanguru-1725557056933">
+                                </div>
+                                <div class="kgr-admin-field" x-show="googleRecaptchaType === 'enterprise'">
+                                    <label>Enterprise Site Key</label>
+                                    <div class="kgr-admin-help" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+                                        <span x-text="credentialStatus('google_recaptcha_enterprise_site_key', <?php echo $has_google_enterprise_site_key ? 'true' : 'false'; ?>)"></span>
+                                        <button type="button" class="kgr-btn" @click="toggleCredentialEdit('google_recaptcha_enterprise_site_key')">
+                                            <span x-text="credentialEditing.google_recaptcha_enterprise_site_key ? 'Cancel' : 'Replace site key'"></span>
+                                        </button>
+                                    </div>
+                                    <input type="text" name="captcha[google_recaptcha_enterprise_site_key]" x-show="credentialEditing.google_recaptcha_enterprise_site_key" value="" placeholder="Enter an Enterprise site key">
+                                </div>
+                                <div class="kgr-admin-field" x-show="googleRecaptchaType === 'enterprise'">
+                                    <label>Google Cloud API Key</label>
+                                    <div class="kgr-admin-help" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+                                        <span x-text="credentialStatus('google_recaptcha_enterprise_api_key', <?php echo $has_google_enterprise_api_key ? 'true' : 'false'; ?>)"></span>
+                                        <button type="button" class="kgr-btn" @click="toggleCredentialEdit('google_recaptcha_enterprise_api_key')">
+                                            <span x-text="credentialEditing.google_recaptcha_enterprise_api_key ? 'Cancel' : 'Replace API key'"></span>
+                                        </button>
+                                    </div>
+                                    <input type="password" name="captcha[google_recaptcha_enterprise_api_key]" x-show="credentialEditing.google_recaptcha_enterprise_api_key" value="" autocomplete="new-password" placeholder="Enter a Google Cloud API key">
                                 </div>
                             </div>
                             <div class="kgr-admin-field">
@@ -653,6 +689,7 @@ if ($jira_days_left === null && $jira_token_expires_on !== '') {
             testingWhmcs: false,
             testingCloudflare: false,
             testingGoogle: false,
+            googleRecaptchaType: '<?php echo esc_js($settings['captcha']['google_recaptcha_type'] ?? 'classic'); ?>',
             mappingHealth: {},
             mappingRows: [],
             missingRequests: [],
@@ -673,7 +710,9 @@ if ($jira_days_left === null && $jira_token_expires_on !== '') {
                 cloudflare_turnstile_site_key: false,
                 cloudflare_turnstile_secret_key: false,
                 google_recaptcha_site_key: false,
-                google_recaptcha_secret_key: false
+                google_recaptcha_secret_key: false,
+                google_recaptcha_enterprise_site_key: false,
+                google_recaptcha_enterprise_api_key: false
             },
             mappingForm: {
                 whmcs_client_id: '',
@@ -750,7 +789,9 @@ if ($jira_days_left === null && $jira_token_expires_on !== '') {
                     cloudflare_turnstile_site_key: 'captcha[cloudflare_turnstile_site_key]',
                     cloudflare_turnstile_secret_key: 'captcha[cloudflare_turnstile_secret_key]',
                     google_recaptcha_site_key: 'captcha[google_recaptcha_site_key]',
-                    google_recaptcha_secret_key: 'captcha[google_recaptcha_secret_key]'
+                    google_recaptcha_secret_key: 'captcha[google_recaptcha_secret_key]',
+                    google_recaptcha_enterprise_site_key: 'captcha[google_recaptcha_enterprise_site_key]',
+                    google_recaptcha_enterprise_api_key: 'captcha[google_recaptcha_enterprise_api_key]'
                 };
                 return map[field] || '';
             },

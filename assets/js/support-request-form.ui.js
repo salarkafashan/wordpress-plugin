@@ -72,16 +72,12 @@
 						const alpineState = window.Alpine.$data( el );
 						
 						if ( alpineState ) {
-							console.log( '[KGR] Alpine state found, linking...' );
 							// Sync our initial state into Alpine
 							Object.assign( alpineState, this.state );
 							// Link our state to Alpine's proxy
 							this.state = alpineState;
-						} else {
-							console.warn( '[KGR] Alpine state not found on root element' );
 						}
 					} catch ( e ) {
-						console.error( '[KGR] Alpine data sync failed', e );
 					}
 				}
 
@@ -321,7 +317,6 @@
 
 			try {
 				const payload = await this.buildPayload();
-				console.log( '[KGR] Submitting payload:', Object.fromEntries( payload.entries() ) );
 				
 				const response = await this.request( this.config.submitRequestEndpoint, {
 					method: 'POST',
@@ -340,8 +335,9 @@
 					this.showFileReselectHints();
 				}
 			} catch ( error ) {
-				this.setSubmitState( 'error', this.config.i18n.genericError );
-				this.showAlert( 'error', this.config.i18n.genericError );
+				const message = error && error.message ? error.message : this.config.i18n.genericError;
+				this.setSubmitState( 'error', message );
+				this.showAlert( 'error', message );
 				this.showFileReselectHints();
 			} finally {
 				this.setSubmittingState( false );
@@ -540,7 +536,6 @@
 			const maxScreenshotSize = ( this.config.maxScreenshotMb || 1 ) * 1024 * 1024;
 
 			this.state.issues.forEach( ( issue, index ) => {
-				console.log( `[KGR] Validating issue ${ index }`, issue );
 				const normalizedPageUrl = this.normalizeUrlInput( issue.page_url );
 				if ( ! normalizedPageUrl ) {
 					this.setIssueError( index, 'page_url', 'Please add a valid page URL.' );
@@ -614,7 +609,6 @@
 				}
 			} );
 
-			console.log( '[KGR] Validation result:', valid );
 			return valid;
 		}
 
@@ -903,9 +897,6 @@
 					data = JSON.parse( text );
 				} catch ( parseError ) {
 					throw new Error( `Invalid JSON response (${ response.status }): ${ text.slice( 0, 180 ) }` );
-				}
-				if ( ! response.ok && data && data.message ) {
-					throw new Error( data.message );
 				}
 				return data;
 			} finally {

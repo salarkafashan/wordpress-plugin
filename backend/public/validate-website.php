@@ -55,12 +55,15 @@ try {
         exit;
     }
 
-    $client = (new WhmcsService())->safeFindClientByDomain($domain);
+    $whmcsService = new WhmcsService();
+    $client = $whmcsService->safeFindClientByDomain($domain);
     if (!$client) {
-        Logger::error('Website validation failed: WHMCS lookup returned no client', [
-            'trace_id' => $traceId,
-            'domain' => $domain,
-        ]);
+        if (!$whmcsService->wasLastLookupNotFound()) {
+            Logger::error('Website validation failed: WHMCS lookup returned no client', [
+                'trace_id' => $traceId,
+                'domain' => $domain,
+            ]);
+        }
         Http::json(['success' => false, 'message' => "We couldn't find your website. Please contact our support team."], 404);
         exit;
     }

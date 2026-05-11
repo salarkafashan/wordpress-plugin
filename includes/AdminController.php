@@ -210,6 +210,10 @@ final class AdminController
                         wp_send_json_error(['message' => 'Invalid Jira token expiry date. Use YYYY-MM-DD.']);
                     }
                 }
+                if ($tab === 'captcha' && $key === 'google_recaptcha_type' && !in_array($rawValue, ['classic', 'enterprise'], true)) {
+                    $rawValue = 'classic';
+                    $value = $rawValue;
+                }
                 $existingValue = '';
                 if (is_array($existing) && isset($existing[$tab]) && is_array($existing[$tab]) && isset($existing[$tab][$key])) {
                     $existingValue = (string) $existing[$tab][$key];
@@ -885,8 +889,13 @@ final class AdminController
                 wp_send_json_error(['message' => 'WHMCS settings are incomplete.'], 422);
             }
 
-            $path = '/internal-api/v1/lookup/user-by-email';
-            $payload = ['email' => 'healthcheck+' . time() . '@example.com'];
+            /*
+             * Use the same WHMCS lookup route as the public website validator.
+             * The remote API may not expose the email health-check route, and a
+             * missing service result still proves that auth and routing worked.
+             */
+            $path = '/internal-api/v1/lookup/service-by-url';
+            $payload = ['url' => 'credential-check.invalid'];
             $rawJsonBody = (string) json_encode($payload, JSON_UNESCAPED_SLASHES);
             $timestamp = (string) time();
             $nonce = bin2hex(random_bytes(16));
@@ -905,7 +914,11 @@ final class AdminController
             [$statusCode, $body] = AdminHttpClient::postJson($url, $headers, $rawJsonBody);
             $decoded = json_decode((string) $body, true);
             if ($statusCode >= 200 && $statusCode < 300) {
-                wp_send_json_success(['message' => 'WHMCS credentials are valid.']);
+                wp_send_json_success(['message' => 'WHMCS credentials are valid and the lookup endpoint responded.']);
+                return;
+            }
+            if (in_array($statusCode, [404, 422], true)) {
+                wp_send_json_success(['message' => 'WHMCS credentials are valid and the lookup endpoint responded.']);
                 return;
             }
             $errorMessage = is_array($decoded) && !empty($decoded['message']) ? (string) $decoded['message'] : 'Unexpected WHMCS response.';
@@ -952,10 +965,44 @@ final class AdminController
             wp_send_json_error(['message' => 'Unauthorized'], 403);
         }
 
+        $type = strtolower(trim((string) Config::get('GOOGLE_RECAPTCHA_TYPE', 'classic')));
+        if ($type === 'enterprise') {
+            $projectId = trim((string) Config::get('GOOGLE_RECAPTCHA_ENTERPRISE_PROJECT_ID', ''));
+            $siteKey = trim((string) Config::get('GOOGLE_RECAPTCHA_ENTERPRISE_SITE_KEY', ''));
+            $apiKey = trim((string) Config::get('GOOGLE_RECAPTCHA_ENTERPRISE_API_KEY', ''));
+            if ($projectId === '' || $siteKey === '' || $apiKey === '') {
+                wp_send_json_error(['message' => 'Google Enterprise project ID/site key/API key is incomplete.'], 422);
+            }
+
+            $rawBody = (string) json_encode([
+                'event' => [
+                    'token' => 'kgr-test-invalid-token',
+                    'siteKey' => $siteKey,
+                    'expectedAction' => (string) Config::get('GOOGLE_RECAPTCHA_EXPECTED_ACTION', 'submit'),
+                    'userAgent' => isset($_SERVER['HTTP_USER_AGENT']) ? (string) $_SERVER['HTTP_USER_AGENT'] : '',
+                    'userIpAddress' => isset($_SERVER['REMOTE_ADDR']) ? (string) $_SERVER['REMOTE_ADDR'] : '',
+                ],
+            ], JSON_UNESCAPED_SLASHES);
+            [$statusCode, $body] = AdminHttpClient::postJson(
+                'https://recaptchaenterprise.googleapis.com/v1/projects/' . rawurlencode($projectId) . '/assessments?key=' . rawurlencode($apiKey),
+                ['Content-Type: application/json; charset=utf-8'],
+                $rawBody
+            );
+            $decoded = json_decode((string) $body, true);
+            if ($statusCode >= 200 && $statusCode < 300 && is_array($decoded) && isset($decoded['tokenProperties'])) {
+                wp_send_json_success(['message' => 'Google Enterprise keys look valid (assessment endpoint accepted the request).']);
+                return;
+            }
+
+            $errorMessage = is_array($decoded) && isset($decoded['error']['message']) ? (string) $decoded['error']['message'] : 'Unexpected Google Enterprise response.';
+            wp_send_json_error(['message' => 'Google Enterprise key test failed: ' . $errorMessage], 422);
+            return;
+        }
+
         $siteKey = trim((string) Config::get('GOOGLE_RECAPTCHA_SITE_KEY', ''));
         $secret = trim((string) Config::get('GOOGLE_RECAPTCHA_SECRET_KEY', ''));
         if ($siteKey === '' || $secret === '') {
-            wp_send_json_error(['message' => 'Google site key/secret is incomplete.'], 422);
+            wp_send_json_error(['message' => 'Google classic site key/secret key is incomplete.'], 422);
         }
 
         [$statusCode, $body] = AdminHttpClient::postForm('https://www.google.com/recaptcha/api/siteverify', [
@@ -1052,6 +1099,8 @@ final class AdminController
             'captcha:cloudflare_turnstile_secret_key',
             'captcha:google_recaptcha_site_key',
             'captcha:google_recaptcha_secret_key',
+            'captcha:google_recaptcha_enterprise_site_key',
+            'captcha:google_recaptcha_enterprise_api_key',
         ];
         return in_array($tab . ':' . $key, $pairs, true);
     }
