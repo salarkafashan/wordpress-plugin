@@ -2,8 +2,8 @@
 /**
  * Plugin Name: Kanguru Support
  * Description: Integrated multi-step support request system with WHMCS backend.
- * Version: 1.1.0
- * Author: Kanguru Team
+ * Version: 1.1.1
+ * Author: Salar Kafashan
  * Text Domain: knaguru-support
  */
 
@@ -15,7 +15,7 @@ if (!defined('ABSPATH')) {
 define('KGR_PLUGIN_FILE', __FILE__);
 define('KGR_PLUGIN_PATH', plugin_dir_path(__FILE__));
 define('KGR_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('KGR_PLUGIN_VERSION', '1.1.0');
+define('KGR_PLUGIN_VERSION', '1.1.1');
 
 // 2. Define Backend Path
 define('KGR_BACKEND_PATH', KGR_PLUGIN_PATH . 'backend/');
