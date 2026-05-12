@@ -2,10 +2,39 @@
 ( function () {
 	'use strict';
 
+	function maskValue( value ) {
+		const val = ( value || '' ).toString().trim();
+		if ( ! val ) {
+			return { exists: false, length: 0, first4: '', last6: '' };
+		}
+		return {
+			exists: true,
+			length: val.length,
+			first4: val.substring( 0, 4 ),
+			last6: val.length >= 6 ? val.substring( val.length - 6 ) : val
+		};
+	}
+
+	function debugLog( config, message, data ) {
+		if ( config && config.captchaDebug ) {
+			console.log( '[Captcha Debug] ' + message, data );
+		}
+	}
+
 	async function getGoogleCaptchaToken( config ) {
 		const siteKey = ( config.googleSiteKey || '' ).toString().trim();
 		const action = ( config.googleRecaptchaAction || 'submit' ).toString();
 		const type = ( config.googleRecaptchaType || 'classic' ).toString().toLowerCase();
+
+		debugLog( config, 'Starting Google reCAPTCHA token generation', {
+			google_type: type,
+			script_loaded: typeof window.grecaptcha !== 'undefined',
+			grecaptcha_exists: !! window.grecaptcha,
+			grecaptcha_enterprise_exists: !! ( window.grecaptcha && window.grecaptcha.enterprise ),
+			site_key: maskValue( siteKey ),
+			action: action
+		} );
+
 		if ( ! siteKey ) {
 			throw new Error( 'Google reCAPTCHA is not configured.' );
 		}
@@ -22,8 +51,13 @@
 			recaptcha.ready( async () => {
 				try {
 					const token = await recaptcha.execute( siteKey, { action } );
+					debugLog( config, 'Google reCAPTCHA token generated', {
+						token_generated: !! token,
+						token_info: maskValue( token )
+					} );
 					resolve( token || '' );
 				} catch ( error ) {
+					debugLog( config, 'Google reCAPTCHA token generation failed', { error: error.message } );
 					reject( new Error( 'Google reCAPTCHA validation failed. Please try again.' ) );
 				}
 			} );
@@ -32,6 +66,12 @@
 
 	async function getCloudflareCaptchaToken( form, config, context ) {
 		const siteKey = ( config.cloudflareSiteKey || '' ).toString().trim();
+
+		debugLog( config, 'Starting Cloudflare Turnstile token generation', {
+			site_key: maskValue( siteKey ),
+			turnstile_exists: !! window.turnstile
+		} );
+
 		if ( ! siteKey ) {
 			throw new Error( 'Cloudflare Turnstile is not configured.' );
 		}
@@ -53,7 +93,13 @@
 					context.turnstileWidgetId = window.turnstile.render( container, {
 						sitekey: siteKey,
 						size: 'invisible',
-						callback: ( token ) => resolve( token || '' ),
+						callback: ( token ) => {
+							debugLog( config, 'Cloudflare Turnstile token generated', {
+								token_generated: !! token,
+								token_info: maskValue( token )
+							} );
+							resolve( token || '' );
+						},
 						'error-callback': () => reject( new Error( 'Cloudflare Turnstile validation failed. Please try again.' ) ),
 						'expired-callback': () => reject( new Error( 'Cloudflare Turnstile expired. Please try again.' ) ),
 					} );
@@ -89,9 +135,17 @@
 
 			const captchaToken = await getCaptchaToken( form, config, context );
 			if ( captchaToken ) {
-				formData.append( 'captcha_token', captchaToken );
-				formData.append( 'cf-turnstile-response', captchaToken );
-				formData.append( 'g-recaptcha-response', captchaToken );
+				formData.set( 'captcha_token', captchaToken );
+				formData.set( 'cf-turnstile-response', captchaToken );
+				formData.set( 'g-recaptcha-response', captchaToken );
+				
+				debugLog( config, 'Captcha payload appended to FormData', {
+					captcha_token_length: captchaToken.length,
+					g_recaptcha_response_length: captchaToken.length,
+					payload_keys: Array.from( formData.keys() )
+				} );
+			} else {
+				debugLog( config, 'No captcha token generated to append' );
 			}
 		},
 	};

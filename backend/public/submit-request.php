@@ -1,6 +1,6 @@
 <?php
 
-declare(strict_types=1);
+// No strict types for compatibility
 
 require_once dirname(__DIR__) . '/src/bootstrap.php';
 
@@ -114,14 +114,22 @@ try {
         exit;
     }
 
-    Logger::info('Captcha submit diagnostics', [
-        'trace_id' => $traceId,
-        'provider' => Config::get('CAPTCHA_PROVIDER', 'none'),
-        'google_type' => Config::get('GOOGLE_RECAPTCHA_TYPE', 'classic'),
-        'has_captcha_token' => !empty($payload['captcha_token'] ?? null),
-        'has_g_recaptcha_response' => !empty($payload['g-recaptcha-response'] ?? null),
-        'token_length' => strlen((string) ($payload['captcha_token'] ?? $payload['g-recaptcha-response'] ?? '')),
-    ]);
+    if (Config::getBool('CAPTCHA_DEBUG', false)) {
+        $token = (string) ($payload['captcha_token'] ?? $payload['g-recaptcha-response'] ?? '');
+        Logger::info('Captcha submit diagnostics', [
+            'trace_id' => $traceId,
+            'ip' => $ip,
+            'provider' => Config::get('CAPTCHA_PROVIDER', 'none'),
+            'google_type' => Config::get('GOOGLE_RECAPTCHA_TYPE', 'classic'),
+            'request_method' => $_SERVER['REQUEST_METHOD'] ?? 'UNKNOWN',
+            'content_type' => $_SERVER['CONTENT_TYPE'] ?? 'UNKNOWN',
+            'post_keys' => array_keys($_POST),
+            'has_captcha_token' => !empty($payload['captcha_token'] ?? null),
+            'has_g_recaptcha_response' => !empty($payload['g-recaptcha-response'] ?? null),
+            'token_source' => !empty($payload['captcha_token']) ? 'captcha_token' : (!empty($payload['g-recaptcha-response']) ? 'g-recaptcha-response' : 'none'),
+            'token_info' => Logger::mask($token),
+        ]);
+    }
 
     $captcha = (new CaptchaService())->verify($payload, $ip, 'submit');
     if (empty($captcha['success'])) {

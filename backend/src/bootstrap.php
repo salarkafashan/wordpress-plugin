@@ -1,12 +1,10 @@
 <?php
 
-declare(strict_types=1);
-
 use App\config\Config;
 
 define('BASE_PATH', dirname(__DIR__));
 
-spl_autoload_register(static function (string $class): void {
+spl_autoload_register(function ($class) {
     $prefix = 'App\\';
     $baseDir = BASE_PATH . '/src/';
     if (strncmp($prefix, $class, strlen($prefix)) !== 0) {

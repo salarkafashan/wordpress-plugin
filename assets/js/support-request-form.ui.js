@@ -1,4 +1,4 @@
-﻿/* global KGR_CONFIG */
+/* global KGR_CONFIG */
 ( function () {
 	'use strict';
 
@@ -877,6 +877,15 @@
 
 			if ( window.KGRFormSecurity && typeof window.KGRFormSecurity.appendSecurityPayload === 'function' ) {
 				await window.KGRFormSecurity.appendSecurityPayload( this.form, this.config, rawState, this, formData );
+			}
+
+			if ( this.config.captchaDebug ) {
+				const token = formData.get( 'captcha_token' );
+				console.log( '[Captcha Debug] FormData construction complete', {
+					has_captcha_token: !! token,
+					captcha_token_length: token ? token.length : 0,
+					payload_keys: Array.from( formData.keys() )
+				} );
 			}
 
 			return formData;

@@ -8,6 +8,7 @@
 namespace SupportRequestFrontend\Includes;
 
 use App\config\Config;
+use App\helpers\Logger;
 
 if (!defined('ABSPATH')) {
 	exit;
@@ -134,7 +135,8 @@ final class EnqueueSupportRequestAssets
 			'googleRecaptchaAction' => $googleRecaptchaType === 'enterprise' ? 'submit' : (string) Config::get('GOOGLE_RECAPTCHA_EXPECTED_ACTION', 'submit'),
 			'honeypotFieldName' => (string) Config::get('HONEYPOT_FIELD_NAME', 'company_website'),
 			'qaHintsEnabled' => $qaHintsEnabled,
-				'i18n' => array(
+			'captchaDebug' => Config::getBool('CAPTCHA_DEBUG', false),
+			'i18n' => array(
 				'next' => __('Next', 'knaguru-support'),
 				'loading' => __('Loading...', 'knaguru-support'),
 				'back' => __('Back', 'knaguru-support'),
@@ -148,6 +150,15 @@ final class EnqueueSupportRequestAssets
 				'descriptionMinMessage' => __("Please tell us a bit more so we can help you better (at least 20 characters).", 'knaguru-support'),
 			),
 		);
+
+		if (Config::getBool('CAPTCHA_DEBUG', false)) {
+			Logger::info('Frontend captcha config enqueued', [
+				'provider' => $captchaProvider,
+				'google_type' => $googleRecaptchaType,
+				'site_key' => Logger::mask($googleSiteKey),
+				'action' => $config['googleRecaptchaAction'],
+			]);
+		}
 
 		/**
 		 * Filter frontend runtime config before it is localized to JS.

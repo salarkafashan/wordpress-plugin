@@ -1,17 +1,16 @@
 <?php
 
-declare(strict_types=1);
-
 namespace App\config;
 
+use App\helpers\Logger;
 use SupportRequestFrontend\Includes\AdminController;
 
 final class Config
 {
-    private static array $values = [];
-    private static ?array $db_settings = null;
+    private static $values = [];
+    private static $db_settings = null;
 
-    public static function load(string $envFile): void
+    public static function load($envFile)
     {
         if (!is_file($envFile)) {
             return;
@@ -31,7 +30,7 @@ final class Config
         }
     }
 
-    private static function loadFromDb(): void
+    private static function loadFromDb()
     {
         if (self::$db_settings !== null)
             return;
@@ -61,13 +60,13 @@ final class Config
         }
     }
 
-    private static function is_encrypted(string $value): bool
+    private static function is_encrypted($value)
     {
         // Simple heuristic for base64 encoded string from AdminController::encrypt
         return (bool) preg_match('/^[a-zA-Z0-9\/+]*={0,2}$/', $value) && strlen($value) > 32;
     }
 
-    public static function get(string $key, $default = null)
+    public static function get($key, $default = null)
     {
         self::loadFromDb();
         $key = strtoupper($key);
@@ -77,7 +76,35 @@ final class Config
             return self::$values[$key] ?? $_ENV[$key] ?? $default;
         }
 
-        return self::$db_settings[$key] ?? self::$values[$key] ?? $_ENV[$key] ?? $default;
+        $value = self::$db_settings[$key] ?? self::$values[$key] ?? $_ENV[$key] ?? $default;
+
+        $debug = self::$values['CAPTCHA_DEBUG'] ?? $_ENV['CAPTCHA_DEBUG'] ?? '';
+        if (in_array($debug, ['1', 'true', 'yes', 'on'], true)) {
+            $traceKeys = [
+                'CAPTCHA_PROVIDER',
+                'GOOGLE_RECAPTCHA_TYPE',
+                'GOOGLE_RECAPTCHA_SITE_KEY',
+                'GOOGLE_RECAPTCHA_SECRET_KEY',
+                'GOOGLE_RECAPTCHA_ENTERPRISE_PROJECT_ID',
+                'GOOGLE_RECAPTCHA_ENTERPRISE_SITE_KEY',
+                'GOOGLE_RECAPTCHA_ENTERPRISE_API_KEY',
+                'GOOGLE_RECAPTCHA_MIN_SCORE',
+            ];
+            if (in_array($key, $traceKeys, true)) {
+                $source = 'default';
+                if (isset(self::$db_settings[$key]))
+                    $source = 'db';
+                elseif (isset(self::$values[$key]) || isset($_ENV[$key]))
+                    $source = 'env';
+
+                Logger::info("Config read trace: {$key}", [
+                    'source' => $source,
+                    'masked_value' => Logger::mask($value),
+                ]);
+            }
+        }
+
+        return $value;
     }
 
     public static function getEnvValue(string $key, $default = null)
@@ -253,13 +280,13 @@ final class Config
         return substr($value, 0, 2) . str_repeat('*', max(0, $len - 4)) . substr($value, -2);
     }
 
-    public static function getBool(string $key, bool $default = false): bool
+    public static function getBool($key, $default = false)
     {
         $value = strtolower((string) self::get($key, $default ? 'true' : 'false'));
         return in_array($value, ['1', 'true', 'yes', 'on'], true);
     }
 
-    public static function getInt(string $key, int $default = 0): int
+    public static function getInt($key, $default = 0)
     {
         return (int) self::get($key, $default);
     }

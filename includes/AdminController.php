@@ -132,7 +132,7 @@ final class AdminController
         }, 10, 2);
     }
 
-    public static function render_settings_page(): void
+    public static function render_settings_page()
     {
         $template = KGR_PLUGIN_PATH . 'templates/admin-settings.php';
         if (file_exists($template)) {
@@ -148,12 +148,12 @@ final class AdminController
         }
     }
 
-    public static function render_guide_page(): void
+    public static function render_guide_page()
     {
         include KGR_PLUGIN_PATH . 'templates/admin-guide.php';
     }
 
-    public static function ajax_save_settings(): void
+    public static function ajax_save_settings()
     {
         check_ajax_referer('kgr_admin_nonce', 'nonce');
         if (!current_user_can('manage_options')) {
@@ -162,64 +162,41 @@ final class AdminController
 
         $form_data = $_POST['settings'] ?? [];
         if (!is_array($form_data) || $form_data === []) {
-            // Fallback for forms that post grouped tab arrays directly.
             $form_data = [];
-            foreach (['whmcs', 'jira', 'captcha'] as $tabKey) {
+            foreach (['whmcs', 'jira', 'captcha', 'general'] as $tabKey) {
                 if (isset($_POST[$tabKey]) && is_array($_POST[$tabKey])) {
                     $form_data[$tabKey] = $_POST[$tabKey];
                 }
             }
         }
+
+        if (Config::getBool('CAPTCHA_DEBUG', false)) {
+            $raw_prov = 'NOT_FOUND';
+            if (isset($_POST['captcha']['captcha_provider'])) {
+                $raw_prov = $_POST['captcha']['captcha_provider'];
+            } elseif (isset($_POST['settings']['captcha']['captcha_provider'])) {
+                $raw_prov = $_POST['settings']['captcha']['captcha_provider'];
+            }
+            Logger::info('Admin save raw data trace', [
+                'has_settings_post' => isset($_POST['settings']),
+                'has_captcha_post' => isset($_POST['captcha']),
+                'raw_captcha_provider' => $raw_prov,
+            ]);
+        }
         $sanitized = [];
         $existing = get_option('kgr_setting', []);
 
-        // Dynamic sanitization based on tabs
         foreach ($form_data as $tab => $fields) {
-            if (!is_array($fields))
-                continue;
-                
-            if ($tab === 'general') {
-                $validateEmails = static function(string $str): bool {
-                    $emails = array_filter(array_map('trim', explode(',', $str)));
-                    if ($emails === []) return false;
-                    foreach ($emails as $email) {
-                        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) return false;
-                    }
-                    return true;
-                };
-
-                if (empty($fields['admin_emails']) || !$validateEmails((string)$fields['admin_emails'])) {
-                    wp_send_json_error(['message' => 'Invalid or missing admin email address(es).']);
-                }
-                
-                if (($fields['testing_mode'] ?? 'off') === 'on') {
-                    if (empty($fields['test_emails']) || !$validateEmails((string)$fields['test_emails'])) {
-                        wp_send_json_error(['message' => 'Invalid or missing sandbox recipient email address(es).']);
-                    }
-                } else {
-                    // QA hints must be disabled when sandbox mode is off.
-                    $fields['qa_hints_enabled'] = '0';
-                }
-            }
+            if (!is_array($fields)) continue;
 
             foreach ($fields as $key => $value) {
-                $rawValue = trim((string) $value);
-                if ($tab === 'jira' && $key === 'jira_api_token_expires_on' && $rawValue !== '') {
-                    $dt = \DateTime::createFromFormat('Y-m-d', $rawValue);
-                    if (!$dt || $dt->format('Y-m-d') !== $rawValue) {
-                        wp_send_json_error(['message' => 'Invalid Jira token expiry date. Use YYYY-MM-DD.']);
-                    }
-                }
-                if ($tab === 'captcha' && $key === 'google_recaptcha_type' && !in_array($rawValue, ['classic', 'enterprise'], true)) {
-                    $rawValue = 'classic';
-                    $value = $rawValue;
-                }
+                $rawValue = trim((string)$value);
                 $existingValue = '';
-                if (is_array($existing) && isset($existing[$tab]) && is_array($existing[$tab]) && isset($existing[$tab][$key])) {
-                    $existingValue = (string) $existing[$tab][$key];
+                if (is_array($existing) && isset($existing[$tab][$key])) {
+                    $existingValue = (string)$existing[$tab][$key];
                 }
 
-                if (self::should_preserve_on_empty((string) $tab, (string) $key) && $rawValue === '' && $existingValue !== '') {
+                if (self::should_preserve_on_empty((string)$tab, (string)$key) && $rawValue === '' && $existingValue !== '') {
                     $sanitized[$tab][$key] = $existingValue;
                     continue;
                 }
@@ -231,6 +208,20 @@ final class AdminController
             }
         }
 
+        if (Config::getBool('CAPTCHA_DEBUG', false)) {
+            $cap = isset($sanitized['captcha']) ? $sanitized['captcha'] : [];
+            Logger::info('Admin settings save: Captcha configuration trace', [
+                'captcha_provider' => isset($cap['captcha_provider']) ? $cap['captcha_provider'] : 'none',
+                'google_type' => isset($cap['google_recaptcha_type']) ? $cap['google_recaptcha_type'] : 'classic',
+                'classic_site_key' => Logger::mask(isset($cap['google_recaptcha_site_key']) ? $cap['google_recaptcha_site_key'] : ''),
+                'classic_secret_key' => Logger::mask(isset($cap['google_recaptcha_secret_key']) ? self::decrypt($cap['google_recaptcha_secret_key']) : ''),
+                'enterprise_id' => isset($cap['google_recaptcha_enterprise_project_id']) ? $cap['google_recaptcha_enterprise_project_id'] : '',
+                'enterprise_site_key' => Logger::mask(isset($cap['google_recaptcha_enterprise_site_key']) ? $cap['google_recaptcha_enterprise_site_key'] : ''),
+                'enterprise_api_key' => Logger::mask(isset($cap['google_recaptcha_enterprise_api_key']) ? self::decrypt($cap['google_recaptcha_enterprise_api_key']) : ''),
+                'encrypted_secrets' => true
+            ]);
+        }
+
         update_option('kgr_setting', $sanitized);
         if (isset($sanitized['jira'])) {
             delete_option('kgr_jira_token_alert_state');
@@ -239,7 +230,7 @@ final class AdminController
         wp_send_json_success(['message' => 'Settings saved successfully']);
     }
 
-    public static function run_jira_token_health_check(string $trigger = 'manual'): array
+    public static function run_jira_token_health_check($trigger = 'manual')
     {
         $settings = get_option('kgr_setting', []);
         $jira = is_array($settings) && isset($settings['jira']) && is_array($settings['jira']) ? $settings['jira'] : [];
@@ -1110,17 +1101,17 @@ final class AdminController
         return AdminHttpClient::postJson($url, $headers, $rawBody);
     }
 
-    private static function http_post_form(string $url, array $data): array
+    private static function http_post_form($url, $data)
     {
         return AdminHttpClient::postForm($url, $data);
     }
 
-    public static function encrypt(string $value): string
+    public static function encrypt($value)
     {
         return AdminCrypto::encrypt($value);
     }
 
-    public static function decrypt(string $value): string
+    public static function decrypt($value)
     {
         return AdminCrypto::decrypt($value);
     }

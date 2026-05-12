@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 /**
  * Admin Settings Template
  * 
@@ -299,7 +299,7 @@ if ($jira_days_left === null && $jira_token_expires_on !== '') {
                     <h3>Global Security</h3>
                     <div class="kgr-admin-field">
                         <label>Active Captcha Provider</label>
-                        <select name="captcha[captcha_provider]">
+                        <select name="captcha[captcha_provider]" x-model="captchaProvider">
                             <option value="cloudflare" <?php selected($settings['captcha']['captcha_provider'] ?? 'cloudflare', 'cloudflare'); ?>>Cloudflare Turnstile (Recommended)</option>
                             <option value="google" <?php selected($settings['captcha']['captcha_provider'] ?? 'cloudflare', 'google'); ?>>Google reCAPTCHA v3</option>
                             <option value="none" <?php selected($settings['captcha']['captcha_provider'] ?? 'cloudflare', 'none'); ?>>None (Not Recommended)</option>
@@ -689,6 +689,7 @@ if ($jira_days_left === null && $jira_token_expires_on !== '') {
             testingWhmcs: false,
             testingCloudflare: false,
             testingGoogle: false,
+            captchaProvider: '<?php echo esc_js($settings['captcha']['captcha_provider'] ?? 'cloudflare'); ?>',
             googleRecaptchaType: '<?php echo esc_js($settings['captcha']['google_recaptcha_type'] ?? 'classic'); ?>',
             mappingHealth: {},
             mappingRows: [],

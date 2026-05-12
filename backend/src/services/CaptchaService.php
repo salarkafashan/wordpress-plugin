@@ -9,14 +9,31 @@ use App\helpers\Logger;
 
 final class CaptchaService
 {
-    public function verify(array $payload, string $ip, string $context = 'submit'): array
+    public function verify($payload, $ip, $context = 'submit')
     {
         $provider = strtolower((string) Config::get('CAPTCHA_PROVIDER', 'none'));
+
+        if (Config::getBool('CAPTCHA_DEBUG', false)) {
+            Logger::info('Captcha verification starting', [
+                'provider' => $provider,
+                'ip' => $ip,
+                'context' => $context,
+                'payload_keys' => array_keys($payload),
+            ]);
+        }
+
         if ($provider === '' || $provider === 'none') {
             return ['success' => true, 'provider' => 'none'];
         }
 
         $token = $this->extractToken($payload);
+
+        if (Config::getBool('CAPTCHA_DEBUG', false)) {
+            Logger::info('Extracted captcha token info', [
+                'token_info' => Logger::mask($token),
+            ]);
+        }
+
         if ($token === '') {
             return [
                 'success' => false,
@@ -36,7 +53,7 @@ final class CaptchaService
         return ['success' => false, 'message' => 'Unsupported CAPTCHA provider: ' . $provider, 'provider' => $provider];
     }
 
-    private function extractToken(array $payload): string
+    private function extractToken($payload)
     {
         $token = $payload['captcha_token']
             ?? $payload['cf-turnstile-response']
@@ -45,7 +62,7 @@ final class CaptchaService
         return trim((string) $token);
     }
 
-    private function verifyCloudflare(string $token, string $ip): array
+    private function verifyCloudflare($token, $ip)
     {
         $secret = trim((string) Config::get('CLOUDFLARE_TURNSTILE_SECRET_KEY'));
         if ($secret === '') {
@@ -74,9 +91,17 @@ final class CaptchaService
         return ['success' => true, 'provider' => 'cloudflare'];
     }
 
-    private function verifyGoogle(string $token, string $ip, string $context): array
+    private function verifyGoogle($token, $ip, $context)
     {
         $type = strtolower(trim((string) Config::get('GOOGLE_RECAPTCHA_TYPE', 'classic')));
+        
+        if (Config::getBool('CAPTCHA_DEBUG', false)) {
+            Logger::info('Google reCAPTCHA verification branching', [
+                'google_type' => $type,
+                'context' => $context,
+            ]);
+        }
+
         if ($type === 'enterprise') {
             return $this->verifyGoogleEnterprise($token, $ip, $context);
         }
@@ -84,7 +109,7 @@ final class CaptchaService
         return $this->verifyGoogleClassic($token, $ip, $context);
     }
 
-    private function verifyGoogleClassic(string $token, string $ip, string $context): array
+    private function verifyGoogleClassic($token, $ip, $context)
     {
         $secret = trim((string) Config::get('GOOGLE_RECAPTCHA_SECRET_KEY'));
         if ($secret === '') {
@@ -96,19 +121,31 @@ final class CaptchaService
             ];
         }
 
+        if (Config::getBool('CAPTCHA_DEBUG', false)) {
+            Logger::info('Preparing Google reCAPTCHA Classic siteverify request', [
+                'endpoint' => 'classic_siteverify',
+                'secret_key' => Logger::mask($secret),
+                'token' => Logger::mask($token),
+                'remoteip' => $ip,
+            ]);
+        }
+
         $response = $this->postForm('https://www.google.com/recaptcha/api/siteverify', [
             'secret' => $secret,
             'response' => $token,
             'remoteip' => $ip,
         ]);
 
-        Logger::info('Google classic captcha verify result', [
-            'success' => !empty($response['success']),
-            'errors' => $response['error-codes'] ?? [],
-            'score' => $response['score'] ?? null,
-            'action' => $response['action'] ?? null,
-            'hostname' => $response['hostname'] ?? null,
-        ]);
+        if (Config::getBool('CAPTCHA_DEBUG', false)) {
+            Logger::info('Google classic captcha verify response result', [
+                'success' => !empty($response['success']),
+                'error-codes' => $response['error-codes'] ?? [],
+                'score' => $response['score'] ?? null,
+                'action' => $response['action'] ?? null,
+                'hostname' => $response['hostname'] ?? null,
+                'raw_keys' => array_keys($response),
+            ]);
+        }
         if (empty($response['success'])) {
             return [
                 'success' => false,
@@ -140,7 +177,7 @@ final class CaptchaService
         return ['success' => true, 'provider' => 'google'];
     }
 
-    private function verifyGoogleEnterprise(string $token, string $ip, string $context): array
+    private function verifyGoogleEnterprise($token, $ip, $context)
     {
         $siteKey = trim((string) Config::get('GOOGLE_RECAPTCHA_ENTERPRISE_SITE_KEY'));
         $projectId = trim((string) Config::get('GOOGLE_RECAPTCHA_ENTERPRISE_PROJECT_ID'));
@@ -158,14 +195,18 @@ final class CaptchaService
 
         $url = 'https://recaptchaenterprise.googleapis.com/v1/projects/' . rawurlencode($projectId) . '/assessments?key=' . rawurlencode($apiKey);
 
-        Logger::info('Preparing Google reCAPTCHA Enterprise assessment request', [
-            'google_type' => 'enterprise',
-            'project_id' => $projectId,
-            'enterprise_site_key_last_6' => substr($siteKey, -6),
-            'api_key_last_6' => substr($apiKey, -6),
-            'token_length' => strlen($token),
-            'expected_action' => $expectedAction,
-        ]);
+        if (Config::getBool('CAPTCHA_DEBUG', false)) {
+            Logger::info('Preparing Google reCAPTCHA Enterprise assessment request trace', [
+                'google_type' => 'enterprise',
+                'endpoint' => 'enterprise_assessment',
+                'project_id' => $projectId,
+                'enterprise_site_key' => Logger::mask($siteKey),
+                'api_key' => Logger::mask($apiKey),
+                'token' => Logger::mask($token),
+                'expected_action' => $expectedAction,
+                'request_body_shape' => 'event: { token, siteKey, expectedAction }',
+            ]);
+        }
 
         $response = wp_remote_post($url, [
             'headers' => [
@@ -225,14 +266,21 @@ final class CaptchaService
         $tokenProperties = is_array($decoded['tokenProperties'] ?? null) ? $decoded['tokenProperties'] : [];
         $riskAnalysis = is_array($decoded['riskAnalysis'] ?? null) ? $decoded['riskAnalysis'] : [];
 
-        Logger::info('Google reCAPTCHA Enterprise verify result', [
-            'valid' => $tokenProperties['valid'] ?? null,
-            'invalid_reason' => $tokenProperties['invalidReason'] ?? null,
-            'action' => $tokenProperties['action'] ?? null,
-            'hostname' => $tokenProperties['hostname'] ?? null,
-            'score' => $riskAnalysis['score'] ?? null,
-            'reasons' => $riskAnalysis['reasons'] ?? [],
-        ]);
+        if (Config::getBool('CAPTCHA_DEBUG', false)) {
+            Logger::info('Google reCAPTCHA Enterprise verify response result', [
+                'http_status' => $status,
+                'raw_keys' => array_keys($decoded),
+                'tokenProperties.valid' => $tokenProperties['valid'] ?? null,
+                'tokenProperties.invalidReason' => $tokenProperties['invalidReason'] ?? null,
+                'tokenProperties.action' => $tokenProperties['action'] ?? null,
+                'tokenProperties.hostname' => $tokenProperties['hostname'] ?? null,
+                'riskAnalysis.score' => $riskAnalysis['score'] ?? null,
+                'riskAnalysis.reasons' => $riskAnalysis['reasons'] ?? [],
+                'error.code' => $decoded['error']['code'] ?? null,
+                'error.message' => $decoded['error']['message'] ?? null,
+                'error.status' => $decoded['error']['status'] ?? null,
+            ]);
+        }
 
         if (empty($tokenProperties['valid'])) {
             $reason = (string) ($tokenProperties['invalidReason'] ?? 'invalid-input-response');
@@ -267,7 +315,7 @@ final class CaptchaService
         return ['success' => true, 'provider' => 'google'];
     }
 
-    private function captchaFailureMessage(string $provider, array $errors): string
+    private function captchaFailureMessage($provider, $errors)
     {
         $errors = array_values(array_map('strval', $errors));
         if (in_array('missing-input-secret', $errors, true) || in_array('invalid-input-secret', $errors, true)) {
@@ -311,7 +359,7 @@ final class CaptchaService
         return 'Google reCAPTCHA Enterprise verification failed. Please try again.';
     }
 
-    private function postForm(string $url, array $data): array
+    private function postForm($url, $data)
     {
         $timeout = (int) Config::get('CAPTCHA_VERIFY_TIMEOUT', 10);
         $ch = curl_init($url);
