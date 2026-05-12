@@ -3,3 +3,4 @@ backend/logs/
 backend/uploads/
 backend/.env
 .antigravityignore
+dist

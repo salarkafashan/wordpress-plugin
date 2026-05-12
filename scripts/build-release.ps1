@@ -48,6 +48,15 @@ if (-not (Test-Path $outputPath)) {
 Get-ChildItem -Path $repoRoot -Recurse -File | ForEach-Object {
     $full = $_.FullName
     $relative = $full.Substring($repoRoot.Length).TrimStart('\', '/')
+
+    # Safety: if script is ever run from a parent workspace where files are already
+    # under "<slug>/...", strip that prefix to avoid double nesting in the ZIP.
+    $slugPrefix = "$PluginSlug/"
+    $relativeNormalized = $relative.Replace('\', '/')
+    if ($relativeNormalized.StartsWith($slugPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        $relative = $relativeNormalized.Substring($slugPrefix.Length)
+    }
+
     if (Should-ExcludeFile $relative $_.Name) {
         return
     }
