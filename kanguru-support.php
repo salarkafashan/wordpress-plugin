@@ -2,7 +2,8 @@
 /**
  * Plugin Name: Kanguru Support
  * Description: Integrated multi-step support request system with WHMCS backend.
- * Version: 1.1.0
+ * Version: 1.1.1
+ * Update URI: https://github.com/salarkafashan/wordpress-plugin
  * Author: Kanguru Team
  * Text Domain: knaguru-support
  */
@@ -15,7 +16,10 @@ if (!defined('ABSPATH')) {
 define('KGR_PLUGIN_FILE', __FILE__);
 define('KGR_PLUGIN_PATH', plugin_dir_path(__FILE__));
 define('KGR_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('KGR_PLUGIN_VERSION', '1.1.0');
+define('KGR_PLUGIN_VERSION', '1.1.1');
+define('KGR_PLUGIN_UPDATE_URI', 'https://github.com/salarkafashan/wordpress-plugin');
+define('KGR_PLUGIN_SLUG', 'kanguru-support');
+define('KGR_PLUGIN_MIGRATION_OPTION', 'kgr_support_plugin_migration_version');
 
 // 2. Define Backend Path
 define('KGR_BACKEND_PATH', KGR_PLUGIN_PATH . 'backend/');
@@ -34,6 +38,7 @@ require_once KGR_PLUGIN_PATH . 'includes/AdminCrypto.php';
 require_once KGR_PLUGIN_PATH . 'includes/AdminHttpClient.php';
 require_once KGR_PLUGIN_PATH . 'includes/AdminJiraCatalogService.php';
 require_once KGR_PLUGIN_PATH . 'includes/CronController.php';
+require_once KGR_PLUGIN_PATH . 'includes/PluginUpdater.php';
 
 // 4.1 Register Admin Panel & Database Hooks
 add_action('plugins_loaded', function () {
@@ -44,8 +49,10 @@ add_action('plugins_loaded', function () {
 	);
 
 	\SupportRequestFrontend\Includes\DatabaseManager::maybe_upgrade();
+	\SupportRequestFrontend\Includes\DatabaseManager::maybe_run_plugin_migrations(KGR_PLUGIN_VERSION, KGR_PLUGIN_MIGRATION_OPTION);
 	\SupportRequestFrontend\Includes\AdminController::register();
 	\SupportRequestFrontend\Includes\CronController::register();
+	\SupportRequestFrontend\Includes\PluginUpdater::register();
 });
 
 register_activation_hook(KGR_PLUGIN_FILE, function () {
