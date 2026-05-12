@@ -94,10 +94,6 @@ if (!defined('ABSPATH')) {
                     <strong>Admin Failure Warning (Admin Emails):</strong> Sent if Jira ticket creation fails after
                     queue retries.
                 </li>
-                <li>
-                    <strong>Generic Queue Failure (Fallback Admin Email):</strong> Sent for permanent queue failures
-                    outside the Jira-creation-specific warning flow.
-                </li>
             </ul>
         </div>
     </div>

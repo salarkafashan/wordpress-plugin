@@ -28,7 +28,7 @@ final class UploadService
                 }
             }
 
-            if (in_array($issueType, ['Image replacement'], true) && count($validFiles) === 0) {
+            if (in_array($issueType, ['Image replacement', 'Other'], true) && count($validFiles) === 0) {
                 throw new RuntimeException('Screenshots are required for this issue type.');
             }
 

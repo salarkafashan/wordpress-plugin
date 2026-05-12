@@ -158,6 +158,7 @@
 				this.state.service_type = input.value;
 				this.applyBranchState();
 				this.updateLayoutMode();
+				this.applyQaHintsVisibility();
 			}
 			if ( name === 'website_url' ) {
 				this.state.website_url = input.value.trim();
@@ -537,7 +538,7 @@
 
 			this.state.issues.forEach( ( issue, index ) => {
 				const normalizedPageUrl = this.normalizeUrlInput( issue.page_url );
-				if ( ! normalizedPageUrl ) {
+				if ( ! this.isValidWebsiteInput( issue.page_url, true ) || ! normalizedPageUrl ) {
 					this.setIssueError( index, 'page_url', 'Please add a valid page URL.' );
 					valid = false;
 				} else {
@@ -579,6 +580,10 @@
 						this.setIssueError( index, 'screenshots', 'Please upload the replacement image(s) or a ZIP archive.' );
 						valid = false;
 					}
+				}
+				if ( issue.issue_type === ISSUE_TYPES.OTHER && (issue.screenshots || []).length === 0 ) {
+					this.setIssueError( index, 'screenshots', 'Please upload at least one screenshot for "Other" issues.' );
+					valid = false;
 				}
 
 				const shots = issue.screenshots || [];
@@ -804,6 +809,7 @@
 
 			const isContent = issue.issue_type === ISSUE_TYPES.CONTENT;
 			const isImage = issue.issue_type === ISSUE_TYPES.IMAGE;
+			const isOther = issue.issue_type === ISSUE_TYPES.OTHER;
 
 			if ( content ) content.classList.toggle( 'kgr-hidden', ! isContent );
 			if ( image ) image.classList.toggle( 'kgr-hidden', ! isImage );
@@ -812,7 +818,11 @@
 				screenshots.classList.toggle( 'kgr-hidden', isImage );
 				const label = screenshots.querySelector( 'label' );
 				if ( label ) {
-					label.textContent = isContent ? 'Upload files (optional)' : 'Upload screenshots (optional)';
+					if ( isOther ) {
+						label.textContent = 'Upload screenshots (required)';
+					} else {
+						label.textContent = isContent ? 'Upload files (optional)' : 'Upload screenshots (optional)';
+					}
 				}
 				const fileInput = screenshots.querySelector( 'input[type="file"]' );
 				if ( fileInput ) {
@@ -820,7 +830,13 @@
 				}
 				const hint = screenshots.querySelector( '.kgr-hint:not([data-file-reselect-note])' );
 				if ( hint ) {
-					hint.textContent = isContent ? 'Accepted: Images, PDF, Word, ZIP.' : '';
+					if ( isContent ) {
+						hint.textContent = 'Accepted: Images, PDF, Word, ZIP.';
+					} else if ( isOther ) {
+						hint.textContent = 'At least one image screenshot is required.';
+					} else {
+						hint.textContent = '';
+					}
 				}
 			}
 		}
@@ -966,8 +982,8 @@
 			if ( ! card ) {
 				return;
 			}
-			const input = card.querySelector( `[data-issue-field="${ field }"]` );
-			const error = card.querySelector( `[data-issue-error="${ field }"]` );
+			const input = this.getIssueFieldNode( card, field );
+			const error = this.getIssueErrorNode( card, field, input );
 			if ( error ) {
 				error.textContent = message;
 			}
@@ -993,11 +1009,36 @@
 			const issueField = input.getAttribute( 'data-issue-field' );
 			if ( issueField ) {
 				const card = input.closest( '[data-issue-card]' );
-				const error = card.querySelector( `[data-issue-error="${ issueField }"]` );
+				const error = this.getIssueErrorNode( card, issueField, input );
 				if ( error ) {
 					error.textContent = '';
 				}
 			}
+		}
+
+		getIssueFieldNode( card, field ) {
+			const nodes = Array.from( card.querySelectorAll( `[data-issue-field="${ field }"]` ) );
+			if ( nodes.length <= 1 ) {
+				return nodes[0] || null;
+			}
+
+			return nodes.find( ( node ) => !node.closest( '.kgr-hidden' ) ) || nodes[0] || null;
+		}
+
+		getIssueErrorNode( card, field, input = null ) {
+			if ( input ) {
+				const localError = input.closest( '.kgr-field, .kgr-field-sub' )?.querySelector( `[data-issue-error="${ field }"]` );
+				if ( localError ) {
+					return localError;
+				}
+			}
+
+			const nodes = Array.from( card.querySelectorAll( `[data-issue-error="${ field }"]` ) );
+			if ( nodes.length <= 1 ) {
+				return nodes[0] || null;
+			}
+
+			return nodes.find( ( node ) => !node.closest( '.kgr-hidden' ) ) || nodes[0] || null;
 		}
 
 		clearErrors() {
@@ -1183,7 +1224,9 @@
 		applyQaHintsVisibility() {
 			const enabled = !! this.config.qaHintsEnabled;
 			this.root.querySelectorAll( '[data-kgr-qa-hint]' ).forEach( ( node ) => {
-				node.classList.toggle( 'kgr-hidden', ! enabled );
+				const websiteOnly = node.hasAttribute( 'data-kgr-qa-hint-website' );
+				const showForWebsite = ! websiteOnly || this.state.service_type === 'Website';
+				node.classList.toggle( 'kgr-hidden', ! enabled || ! showForWebsite );
 			} );
 		}
 
@@ -1315,32 +1358,39 @@
 			}
 		}
 
-		isValidWebsiteInput( value ) {
-			const input = ( value || '' ).trim().toLowerCase();
-			if ( ! input ) {
-				return false;
-			}
-			
-			const withScheme = input.includes( '://' ) ? input : `https://${ input }`;
-			try {
-				const parsed = new URL( withScheme );
-				const host = ( parsed.hostname || '' ).replace( /^www\./, '' );
-				// Enforce pattern: something.tld (at least one dot and 2+ char TLD)
-				return /^[a-z0-9.-]+\.[a-z]{2,}$/i.test( host );
-			} catch ( error ) {
-				return false;
-			}
+		isValidWebsiteInput( value, allowWildcardPath = false ) {
+			return this.normalizeWebsiteInput( value, allowWildcardPath ) !== '';
 		}
 
 		normalizeUrlInput( value ) {
+			return this.normalizeWebsiteInput( value, true );
+		}
+
+		normalizeWebsiteInput( value, allowWildcardPath = false ) {
 			const input = ( value || '' ).trim();
 			if ( ! input ) {
 				return '';
 			}
-			const withScheme = input.includes( '://' ) ? input : `https://${ input }`;
+
+			const hasWildcardPath = allowWildcardPath && /\/\*$/.test( input );
+			const candidate = hasWildcardPath ? input.replace( /\/\*$/, '/' ) : input;
+			const withScheme = candidate.includes( '://' ) ? candidate : `https://${ candidate }`;
+
 			try {
 				const parsed = new URL( withScheme );
-				return parsed.toString();
+				if ( parsed.protocol !== 'https:' && parsed.protocol !== 'http:' ) {
+					return '';
+				}
+				const host = ( parsed.hostname || '' ).replace( /^www\./, '' );
+				if ( ! /^[a-z0-9.-]+\.[a-z]{2,}$/i.test( host ) ) {
+					return '';
+				}
+
+				let normalized = parsed.toString();
+				if ( hasWildcardPath ) {
+					normalized = normalized.replace( /\/$/, '' ) + '/*';
+				}
+				return normalized;
 			} catch ( error ) {
 				return '';
 			}

@@ -123,6 +123,18 @@ final class SupportRequestService
         $stagedServiceFiles = [];
         try {
             if ($sanitized['service_type'] === 'Website') {
+                $screenshotErrors = $this->validateWebsiteScreenshotRequirements($sanitized['issues'], $filesByIssue);
+                if ($screenshotErrors !== []) {
+                    Logger::error('Support submission screenshot requirement validation failed', [
+                        'trace_id' => $traceId,
+                        'error_keys' => array_keys($screenshotErrors),
+                    ]);
+                    return [
+                        'success' => false,
+                        'status_code' => 422,
+                        'errors' => $screenshotErrors,
+                    ];
+                }
                 $stagedWebsiteFiles = $this->uploadService->stageWebsiteIssueFiles($filesByIssue, $sanitized['issues']);
             } else {
                 $stagedServiceFiles = $this->uploadService->stageNonWebsiteFiles($nonWebsiteFiles);
@@ -616,6 +628,30 @@ final class SupportRequestService
             return Validator::normalizeDomainInput((string) ($sanitized['selected_domain'] ?: $sanitized['website_url']));
         }
         return 'service-' . strtolower($sanitized['service_type']);
+    }
+
+    private function validateWebsiteScreenshotRequirements(array $issues, array $filesByIssue): array
+    {
+        $errors = [];
+
+        foreach ($issues as $index => $issue) {
+            $issueType = (string) ($issue['issue_type'] ?? '');
+            if ($issueType !== 'Other') {
+                continue;
+            }
+
+            $files = $filesByIssue[(int) $index] ?? [];
+            $validFiles = array_values(array_filter(
+                $files,
+                static fn(array $file): bool => ((int) ($file['error'] ?? UPLOAD_ERR_NO_FILE)) === UPLOAD_ERR_OK
+            ));
+
+            if (count($validFiles) === 0) {
+                $errors["issues.$index.screenshots"] = 'Please upload at least one screenshot for "Other" issues.';
+            }
+        }
+
+        return $errors;
     }
 
     private function buildAttachmentRows(int $requestId, array $issueIds, array $websiteFiles, array $serviceFiles, array $websiteIssues): array

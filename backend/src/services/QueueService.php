@@ -402,12 +402,11 @@ final class QueueService
                 }
                 return;
             }
-            $this->emailService->send(
-                (string) \App\config\Config::get('ADMIN_EMAIL'),
-                'Queue job failed permanently',
-                'Job type: ' . $job['job_type'] . "\nRequest ID: " . $job['request_id'] . "\nError: " . $error,
-                false
-            );
+            Logger::error('Queue job failed permanently (generic admin email disabled)', [
+                'job_type' => (string) ($job['job_type'] ?? ''),
+                'request_id' => (int) ($job['request_id'] ?? 0),
+                'error' => $error,
+            ]);
         } catch (Throwable $exception) {
             Logger::error('Admin notification failed', ['error' => $exception->getMessage()]);
         }
@@ -490,8 +489,13 @@ final class QueueService
             if ($relativePath === '') {
                 continue;
             }
+            $attachmentId = (int) ($attachment['id'] ?? 0);
+            $downloadUrl = $this->buildAdminAttachmentDownloadUrl($attachmentId);
+            $label = htmlspecialchars((string) ($attachment['original_name'] ?? 'file'), ENT_QUOTES, 'UTF-8');
             $html .= '<li style="margin-bottom:6px;">' .
-                htmlspecialchars((string) ($attachment['original_name'] ?? 'file'), ENT_QUOTES, 'UTF-8') .
+                ($downloadUrl !== ''
+                    ? '<a href="' . htmlspecialchars($downloadUrl, ENT_QUOTES, 'UTF-8') . '" style="color:#00001A;text-decoration:underline;">' . $label . '</a>'
+                    : $label) .
                 '</li>';
         }
         if ($hasLinks) {
@@ -517,6 +521,19 @@ final class QueueService
         if (in_array($jobType, ['attach_file_to_jira'], true)) {
             $this->attachmentModel->markJiraStatus($attachmentId, 'failed');
         }
+    }
+
+    private function buildAdminAttachmentDownloadUrl(int $attachmentId): string
+    {
+        if ($attachmentId <= 0) {
+            return '';
+        }
+        if (!function_exists('admin_url') || !function_exists('wp_nonce_url')) {
+            return '';
+        }
+
+        $base = admin_url('admin-ajax.php?action=kgr_download_attachment&attachment_id=' . $attachmentId);
+        return wp_nonce_url($base, 'kgr_download_attachment_' . $attachmentId, 'nonce');
     }
 
     private function buildSimpleConfirmationContent(array $request, array $issues, string $confirmUrl): string

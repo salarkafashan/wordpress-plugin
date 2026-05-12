@@ -47,9 +47,11 @@ final class Config
             foreach ($fields as $key => $value) {
                 $configKey = strtoupper($key);
 
-                // Decrypt if it's sensitive
-                if (method_exists(AdminController::class, 'decrypt') && self::is_encrypted($value)) {
-                    $decrypted = (string) AdminController::decrypt((string) $value);
+                // Decrypt sensitive settings by field name. Some encrypted values
+                // include non-base64 URL/key-like characters in the IV+ciphertext
+                // bundle, so a format heuristic can leave encrypted secrets in use.
+                if (self::isSensitiveField((string) $key) && is_string($value) && $value !== '') {
+                    $decrypted = self::decryptSettingValue((string) $value);
                     if ($decrypted !== '') {
                         $value = $decrypted;
                     }
@@ -64,6 +66,49 @@ final class Config
     {
         // Simple heuristic for base64 encoded string from AdminController::encrypt
         return (bool) preg_match('/^[a-zA-Z0-9\/+]*={0,2}$/', $value) && strlen($value) > 32;
+    }
+
+    private static function isSensitiveField(string $field): bool
+    {
+        return strpos($field, 'token') !== false
+            || strpos($field, 'secret') !== false
+            || strpos($field, 'password') !== false
+            || strpos($field, 'api_key') !== false
+            || strpos($field, 'auth') !== false
+            || strpos($field, 'pass') !== false;
+    }
+
+    private static function decryptSettingValue(string $value): string
+    {
+        if ($value === '') {
+            return '';
+        }
+
+        if (method_exists(AdminController::class, 'decrypt')) {
+            $decrypted = (string) AdminController::decrypt($value);
+            if ($decrypted !== '') {
+                return $decrypted;
+            }
+        }
+
+        $data = base64_decode($value);
+        if ($data === false) {
+            return '';
+        }
+
+        $ivLen = openssl_cipher_iv_length('aes-256-cbc');
+        if (!is_int($ivLen) || $ivLen <= 0 || strlen($data) <= $ivLen) {
+            return '';
+        }
+
+        $iv = substr($data, 0, $ivLen);
+        $encrypted = substr($data, $ivLen);
+        if ($iv === '' || strlen($iv) !== $ivLen || $encrypted === '') {
+            return '';
+        }
+
+        $key = defined('AUTH_KEY') ? AUTH_KEY : 'fallback_kgr_key';
+        return (string) openssl_decrypt($encrypted, 'aes-256-cbc', hash('sha256', $key, true), 0, $iv);
     }
 
     public static function get($key, $default = null)
