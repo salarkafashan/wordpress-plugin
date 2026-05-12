@@ -34,6 +34,7 @@ require_once KGR_PLUGIN_PATH . 'includes/AdminCrypto.php';
 require_once KGR_PLUGIN_PATH . 'includes/AdminHttpClient.php';
 require_once KGR_PLUGIN_PATH . 'includes/AdminJiraCatalogService.php';
 require_once KGR_PLUGIN_PATH . 'includes/CronController.php';
+require_once KGR_PLUGIN_PATH . 'includes/PluginUpdater.php';
 
 // 4.1 Register Admin Panel & Database Hooks
 add_action('plugins_loaded', function () {
@@ -44,8 +45,10 @@ add_action('plugins_loaded', function () {
 	);
 
 	\SupportRequestFrontend\Includes\DatabaseManager::maybe_upgrade();
+	\SupportRequestFrontend\Includes\DatabaseManager::maybe_run_plugin_migrations(KGR_PLUGIN_VERSION, KGR_PLUGIN_MIGRATION_OPTION);
 	\SupportRequestFrontend\Includes\AdminController::register();
 	\SupportRequestFrontend\Includes\CronController::register();
+	\SupportRequestFrontend\Includes\PluginUpdater::register();
 });
 
 register_activation_hook(KGR_PLUGIN_FILE, function () {

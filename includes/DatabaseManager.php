@@ -182,6 +182,37 @@ final class DatabaseManager
         }
     }
 
+    /**
+     * Run plugin-version migrations after code updates.
+     * Uses a dedicated option so schema versioning can remain independent.
+     */
+    public static function maybe_run_plugin_migrations(string $targetVersion, string $optionName = 'kgr_support_plugin_migration_version'): void
+    {
+        $target = trim($targetVersion);
+        if ($target === '') {
+            return;
+        }
+
+        $installed = (string) get_option($optionName, '0.0.0');
+        if (version_compare($installed, $target, '>=')) {
+            return;
+        }
+
+        self::run_plugin_migrations($installed, $target);
+        update_option($optionName, $target, false);
+    }
+
+    private static function run_plugin_migrations(string $fromVersion, string $targetVersion): void
+    {
+        // Keep table/index creation idempotent via dbDelta and structure migration helper.
+        self::install();
+
+        // Example placeholder for future incremental migrations:
+        // if (version_compare($fromVersion, '1.1.2', '<')) {
+        //     // Migration steps for 1.1.2
+        // }
+    }
+
     public static function rebuild(): void
     {
         global $wpdb;
