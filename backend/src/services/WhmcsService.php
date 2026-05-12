@@ -17,6 +17,7 @@ final class WhmcsService
     private const LOOKUP_USER_BY_EMAIL = '/internal-api/v1/lookup/user-by-email';
 
     private ClientCacheModel $cacheModel;
+    private bool $lastLookupNotFound = false;
 
     public function __construct()
     {
@@ -75,6 +76,7 @@ final class WhmcsService
 
     public function findClientByDomain(string $domain): ?array
     {
+        $this->lastLookupNotFound = false;
         $normalizedDomain = Validator::normalizeDomainInput($domain);
         if ($normalizedDomain === '') {
             Logger::error('WHMCS domain lookup skipped: empty normalized domain', ['domain_input' => $domain]);
@@ -84,6 +86,10 @@ final class WhmcsService
 
         $response = $this->callLookup(self::LOOKUP_SERVICE_BY_URL, ['url' => $normalizedDomain]);
         if (empty($response['success']) || !isset($response['data']) || !is_array($response['data'])) {
+            if (!empty($response['_not_found'])) {
+                $this->lastLookupNotFound = true;
+                return null;
+            }
             Logger::error('WHMCS domain lookup returned no usable data', ['normalized_domain' => $normalizedDomain]);
             return null;
         }
@@ -168,9 +174,15 @@ final class WhmcsService
         try {
             return $this->findClientByDomain($domain);
         } catch (Throwable $exception) {
+            $this->lastLookupNotFound = false;
             Logger::error('WHMCS API lookup by domain failed', ['error' => $exception->getMessage()]);
             return null;
         }
+    }
+
+    public function wasLastLookupNotFound(): bool
+    {
+        return $this->lastLookupNotFound;
     }
 
     private function cacheClient(array $client): void
@@ -207,8 +219,8 @@ final class WhmcsService
     private function callLookup(string $path, array $payload): ?array
     {
         $baseUrl = rtrim((string) Config::getWhmcsValue('WHMCS_API_BASE_URL', 'https://kgr360.com'), '/');
-        $apiKey = (string) Config::getWhmcsValue('WHMCS_API_KEY', 'site-a');
-        $secret = (string) Config::getWhmcsValue('WHMCS_API_TOKEN', '');
+        $apiKey = trim((string) Config::getWhmcsValue('WHMCS_API_KEY', 'site-a'));
+        $secret = trim((string) Config::getWhmcsValue('WHMCS_API_TOKEN', ''));
 
         if ($secret === '' || $apiKey === '') {
             throw new RuntimeException('WHMCS API credentials are not configured.');
@@ -238,6 +250,9 @@ final class WhmcsService
 
     private function sendJsonRequest(string $url, array $headers, string $rawJsonBody): ?array
     {
+        $timeout = max(3, (int) Config::get('WHMCS_API_TIMEOUT', 12));
+        $connectTimeout = max(2, (int) Config::get('WHMCS_API_CONNECT_TIMEOUT', 5));
+
         if (function_exists('curl_init')) {
 
             $ch = curl_init($url);
@@ -245,7 +260,8 @@ final class WhmcsService
                 CURLOPT_RETURNTRANSFER => true,
                 CURLOPT_POST => true,
                 CURLOPT_FOLLOWLOCATION => true,
-                CURLOPT_TIMEOUT => 30,
+                CURLOPT_CONNECTTIMEOUT => $connectTimeout,
+                CURLOPT_TIMEOUT => $timeout,
                 CURLOPT_HTTPHEADER => $headers,
                 CURLOPT_POSTFIELDS => $rawJsonBody,
             ]);
@@ -268,13 +284,16 @@ final class WhmcsService
                 throw new RuntimeException('WHMCS API returned invalid JSON. HTTP ' . $statusCode);
             }
 
-            Logger::info('WHMCS API response (curl)', [
-                'url' => $url,
-                'status_code' => $statusCode,
-                'response' => $decoded,
-            ]);
-
             if ($statusCode >= 400) {
+                if ($this->isNotFoundResponse($statusCode, $decoded)) {
+                    return ['success' => false, '_not_found' => true, 'message' => $decoded['message'] ?? null];
+                }
+
+                Logger::info('WHMCS API response (curl)', [
+                    'url' => $url,
+                    'status_code' => $statusCode,
+                    'response' => $decoded,
+                ]);
                 Logger::error('WHMCS API error status (curl)', [
                     'url' => $url,
                     'status_code' => $statusCode,
@@ -282,6 +301,12 @@ final class WhmcsService
                 ]);
                 return null;
             }
+
+            Logger::info('WHMCS API response (curl)', [
+                'url' => $url,
+                'status_code' => $statusCode,
+                'response' => $decoded,
+            ]);
 
             return $decoded;
         }
@@ -293,7 +318,7 @@ final class WhmcsService
                 'header' => implode("\r\n", $headers),
                 'content' => $rawJsonBody,
                 'ignore_errors' => true,
-                'timeout' => 30,
+                'timeout' => $timeout,
             ],
         ]);
 
@@ -315,13 +340,16 @@ final class WhmcsService
             throw new RuntimeException('WHMCS API returned invalid JSON. HTTP ' . $statusCode);
         }
 
-        Logger::info('WHMCS API response (stream)', [
-            'url' => $url,
-            'status_code' => $statusCode,
-            'response' => $decoded,
-        ]);
-
         if ($statusCode >= 400) {
+            if ($this->isNotFoundResponse($statusCode, $decoded)) {
+                return ['success' => false, '_not_found' => true, 'message' => $decoded['message'] ?? null];
+            }
+
+            Logger::info('WHMCS API response (stream)', [
+                'url' => $url,
+                'status_code' => $statusCode,
+                'response' => $decoded,
+            ]);
             Logger::error('WHMCS API error status (stream)', [
                 'url' => $url,
                 'status_code' => $statusCode,
@@ -330,6 +358,22 @@ final class WhmcsService
             return null;
         }
 
+        Logger::info('WHMCS API response (stream)', [
+            'url' => $url,
+            'status_code' => $statusCode,
+            'response' => $decoded,
+        ]);
+
         return $decoded;
+    }
+
+    private function isNotFoundResponse(int $statusCode, array $decoded): bool
+    {
+        if ($statusCode !== 404) {
+            return false;
+        }
+
+        $message = strtolower(trim((string) ($decoded['message'] ?? '')));
+        return $message === '' || strpos($message, 'not found') !== false;
     }
 }

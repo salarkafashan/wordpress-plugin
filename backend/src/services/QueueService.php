@@ -63,45 +63,65 @@ final class QueueService
 
     public function process(array $jobTypes = [], int $limit = 25, ?array &$stats = null): void
     {
-        $jobs = $this->queueModel->claimJobs($jobTypes, $limit);
         $localStats = [
-            'claimed' => count($jobs),
+            'claimed' => 0,
             'completed' => 0,
             'retry' => 0,
             'failed' => 0,
             'errors' => [],
+            'passes' => 0,
         ];
-        foreach ($jobs as $job) {
-            $jobId = (int) $job['id'];
-            $lockToken = (string) ($job['lock_token'] ?? '');
-            try {
-                $this->executeJob($job);
-                $this->queueModel->markCompleted($jobId, $lockToken);
-                $localStats['completed']++;
-            } catch (Throwable $exception) {
-                $attempts = (int) $job['attempts'] + 1;
-                $status = $this->queueModel->markRetryOrFailed(
-                    $jobId,
-                    $lockToken,
-                    $attempts,
-                    (int) $job['max_attempts'],
-                    $exception->getMessage()
-                );
-                Logger::error('Queue job failed', ['job_id' => $jobId, 'job_type' => $job['job_type'], 'status' => $status, 'error' => $exception->getMessage()]);
-                $this->markAttachmentFailureIfNeeded((string) $job['job_type'], (string) $job['payload_json'], $status);
-                $localStats['errors'][] = [
-                    'job_id' => $jobId,
-                    'job_type' => (string) ($job['job_type'] ?? ''),
-                    'status' => $status,
-                    'error' => $exception->getMessage(),
-                ];
-                if ($status === 'failed') {
-                    $localStats['failed']++;
-                } else {
-                    $localStats['retry']++;
+
+        // Process chained jobs in the same cron run (e.g. create_jira_ticket -> attach_file_to_jira)
+        // so low-traffic sites do not wait for the next visit/cron tick.
+        $remaining = max(1, $limit);
+        $pass = 0;
+        while ($remaining > 0 && $pass < 8) {
+            $pass++;
+            $localStats['passes'] = $pass;
+            $jobs = $this->queueModel->claimJobs($jobTypes, $remaining);
+            if ($jobs === []) {
+                break;
+            }
+
+            $localStats['claimed'] += count($jobs);
+
+            foreach ($jobs as $job) {
+                $jobId = (int) $job['id'];
+                $lockToken = (string) ($job['lock_token'] ?? '');
+                try {
+                    $this->executeJob($job);
+                    $this->queueModel->markCompleted($jobId, $lockToken);
+                    $localStats['completed']++;
+                } catch (Throwable $exception) {
+                    $attempts = (int) $job['attempts'] + 1;
+                    $status = $this->queueModel->markRetryOrFailed(
+                        $jobId,
+                        $lockToken,
+                        $attempts,
+                        (int) $job['max_attempts'],
+                        $exception->getMessage()
+                    );
+                    Logger::error('Queue job failed', ['job_id' => $jobId, 'job_type' => $job['job_type'], 'status' => $status, 'error' => $exception->getMessage()]);
+                    $this->markAttachmentFailureIfNeeded((string) $job['job_type'], (string) $job['payload_json'], $status);
+                    $localStats['errors'][] = [
+                        'job_id' => $jobId,
+                        'job_type' => (string) ($job['job_type'] ?? ''),
+                        'status' => $status,
+                        'error' => $exception->getMessage(),
+                    ];
+                    if ($status === 'failed') {
+                        $localStats['failed']++;
+                    } else {
+                        $localStats['retry']++;
+                    }
+                    if ($status === 'failed') {
+                        $this->notifyAdminFailure($job, $exception->getMessage());
+                    }
                 }
-                if ($status === 'failed') {
-                    $this->notifyAdminFailure($job, $exception->getMessage());
+                $remaining--;
+                if ($remaining <= 0) {
+                    break;
                 }
             }
         }
@@ -382,12 +402,11 @@ final class QueueService
                 }
                 return;
             }
-            $this->emailService->send(
-                (string) \App\config\Config::get('ADMIN_EMAIL'),
-                'Queue job failed permanently',
-                'Job type: ' . $job['job_type'] . "\nRequest ID: " . $job['request_id'] . "\nError: " . $error,
-                false
-            );
+            Logger::error('Queue job failed permanently (generic admin email disabled)', [
+                'job_type' => (string) ($job['job_type'] ?? ''),
+                'request_id' => (int) ($job['request_id'] ?? 0),
+                'error' => $error,
+            ]);
         } catch (Throwable $exception) {
             Logger::error('Admin notification failed', ['error' => $exception->getMessage()]);
         }
@@ -470,10 +489,14 @@ final class QueueService
             if ($relativePath === '') {
                 continue;
             }
-            $link = $baseUrl !== '' ? $baseUrl . '/' . ltrim($relativePath, '/') : $relativePath;
-            $html .= '<li style="margin-bottom:6px;"><a href="' . htmlspecialchars($link, ENT_QUOTES, 'UTF-8') . '" style="color:#00001A;">' .
-                htmlspecialchars((string) ($attachment['original_name'] ?? 'file'), ENT_QUOTES, 'UTF-8') .
-                '</a></li>';
+            $attachmentId = (int) ($attachment['id'] ?? 0);
+            $downloadUrl = $this->buildAdminAttachmentDownloadUrl($attachmentId);
+            $label = htmlspecialchars((string) ($attachment['original_name'] ?? 'file'), ENT_QUOTES, 'UTF-8');
+            $html .= '<li style="margin-bottom:6px;">' .
+                ($downloadUrl !== ''
+                    ? '<a href="' . htmlspecialchars($downloadUrl, ENT_QUOTES, 'UTF-8') . '" style="color:#00001A;text-decoration:underline;">' . $label . '</a>'
+                    : $label) .
+                '</li>';
         }
         if ($hasLinks) {
             $html .= '</ul>';
@@ -498,6 +521,19 @@ final class QueueService
         if (in_array($jobType, ['attach_file_to_jira'], true)) {
             $this->attachmentModel->markJiraStatus($attachmentId, 'failed');
         }
+    }
+
+    private function buildAdminAttachmentDownloadUrl(int $attachmentId): string
+    {
+        if ($attachmentId <= 0) {
+            return '';
+        }
+        if (!function_exists('admin_url') || !function_exists('wp_nonce_url')) {
+            return '';
+        }
+
+        $base = admin_url('admin-ajax.php?action=kgr_download_attachment&attachment_id=' . $attachmentId);
+        return wp_nonce_url($base, 'kgr_download_attachment_' . $attachmentId, 'nonce');
     }
 
     private function buildSimpleConfirmationContent(array $request, array $issues, string $confirmUrl): string

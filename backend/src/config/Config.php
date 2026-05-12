@@ -1,17 +1,16 @@
 <?php
 
-declare(strict_types=1);
-
 namespace App\config;
 
+use App\helpers\Logger;
 use SupportRequestFrontend\Includes\AdminController;
 
 final class Config
 {
-    private static array $values = [];
-    private static ?array $db_settings = null;
+    private static $values = [];
+    private static $db_settings = null;
 
-    public static function load(string $envFile): void
+    public static function load($envFile)
     {
         if (!is_file($envFile)) {
             return;
@@ -31,7 +30,7 @@ final class Config
         }
     }
 
-    private static function loadFromDb(): void
+    private static function loadFromDb()
     {
         if (self::$db_settings !== null)
             return;
@@ -48,9 +47,11 @@ final class Config
             foreach ($fields as $key => $value) {
                 $configKey = strtoupper($key);
 
-                // Decrypt if it's sensitive
-                if (method_exists(AdminController::class, 'decrypt') && self::is_encrypted($value)) {
-                    $decrypted = (string) AdminController::decrypt((string) $value);
+                // Decrypt sensitive settings by field name. Some encrypted values
+                // include non-base64 URL/key-like characters in the IV+ciphertext
+                // bundle, so a format heuristic can leave encrypted secrets in use.
+                if (self::isSensitiveField((string) $key) && is_string($value) && $value !== '') {
+                    $decrypted = self::decryptSettingValue((string) $value);
                     if ($decrypted !== '') {
                         $value = $decrypted;
                     }
@@ -61,13 +62,56 @@ final class Config
         }
     }
 
-    private static function is_encrypted(string $value): bool
+    private static function is_encrypted($value)
     {
         // Simple heuristic for base64 encoded string from AdminController::encrypt
         return (bool) preg_match('/^[a-zA-Z0-9\/+]*={0,2}$/', $value) && strlen($value) > 32;
     }
 
-    public static function get(string $key, $default = null)
+    private static function isSensitiveField(string $field): bool
+    {
+        return strpos($field, 'token') !== false
+            || strpos($field, 'secret') !== false
+            || strpos($field, 'password') !== false
+            || strpos($field, 'api_key') !== false
+            || strpos($field, 'auth') !== false
+            || strpos($field, 'pass') !== false;
+    }
+
+    private static function decryptSettingValue(string $value): string
+    {
+        if ($value === '') {
+            return '';
+        }
+
+        if (method_exists(AdminController::class, 'decrypt')) {
+            $decrypted = (string) AdminController::decrypt($value);
+            if ($decrypted !== '') {
+                return $decrypted;
+            }
+        }
+
+        $data = base64_decode($value);
+        if ($data === false) {
+            return '';
+        }
+
+        $ivLen = openssl_cipher_iv_length('aes-256-cbc');
+        if (!is_int($ivLen) || $ivLen <= 0 || strlen($data) <= $ivLen) {
+            return '';
+        }
+
+        $iv = substr($data, 0, $ivLen);
+        $encrypted = substr($data, $ivLen);
+        if ($iv === '' || strlen($iv) !== $ivLen || $encrypted === '') {
+            return '';
+        }
+
+        $key = defined('AUTH_KEY') ? AUTH_KEY : 'fallback_kgr_key';
+        return (string) openssl_decrypt($encrypted, 'aes-256-cbc', hash('sha256', $key, true), 0, $iv);
+    }
+
+    public static function get($key, $default = null)
     {
         self::loadFromDb();
         $key = strtoupper($key);
@@ -77,7 +121,35 @@ final class Config
             return self::$values[$key] ?? $_ENV[$key] ?? $default;
         }
 
-        return self::$db_settings[$key] ?? self::$values[$key] ?? $_ENV[$key] ?? $default;
+        $value = self::$db_settings[$key] ?? self::$values[$key] ?? $_ENV[$key] ?? $default;
+
+        $debug = self::$values['CAPTCHA_DEBUG'] ?? $_ENV['CAPTCHA_DEBUG'] ?? '';
+        if (in_array($debug, ['1', 'true', 'yes', 'on'], true)) {
+            $traceKeys = [
+                'CAPTCHA_PROVIDER',
+                'GOOGLE_RECAPTCHA_TYPE',
+                'GOOGLE_RECAPTCHA_SITE_KEY',
+                'GOOGLE_RECAPTCHA_SECRET_KEY',
+                'GOOGLE_RECAPTCHA_ENTERPRISE_PROJECT_ID',
+                'GOOGLE_RECAPTCHA_ENTERPRISE_SITE_KEY',
+                'GOOGLE_RECAPTCHA_ENTERPRISE_API_KEY',
+                'GOOGLE_RECAPTCHA_MIN_SCORE',
+            ];
+            if (in_array($key, $traceKeys, true)) {
+                $source = 'default';
+                if (isset(self::$db_settings[$key]))
+                    $source = 'db';
+                elseif (isset(self::$values[$key]) || isset($_ENV[$key]))
+                    $source = 'env';
+
+                Logger::info("Config read trace: {$key}", [
+                    'source' => $source,
+                    'masked_value' => Logger::mask($value),
+                ]);
+            }
+        }
+
+        return $value;
     }
 
     public static function getEnvValue(string $key, $default = null)
@@ -253,13 +325,13 @@ final class Config
         return substr($value, 0, 2) . str_repeat('*', max(0, $len - 4)) . substr($value, -2);
     }
 
-    public static function getBool(string $key, bool $default = false): bool
+    public static function getBool($key, $default = false)
     {
         $value = strtolower((string) self::get($key, $default ? 'true' : 'false'));
         return in_array($value, ['1', 'true', 'yes', 'on'], true);
     }
 
-    public static function getInt(string $key, int $default = 0): int
+    public static function getInt($key, $default = 0)
     {
         return (int) self::get($key, $default);
     }

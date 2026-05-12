@@ -143,8 +143,12 @@ endif;
 								<p class="kgr-error" data-field-error-for="selected_domain"></p>
 								<p class="kgr-error" data-field-error-for="website_url" id="error_website_url"></p>
 							</div>
-							<p class="kgr-hint">
-								<?php esc_html_e('This helps us fetch your site details and process your request faster.', 'knaguru-support'); ?>
+							<p class="kgr-hint kgr-hidden" data-kgr-qa-hint>
+								<?php esc_html_e('QA Hint: as a website you can use', 'knaguru-support'); ?>
+								<button type="button" class="kgr-qa-copy" data-kgr-copy-text="www.test-support.com" data-kgr-copy-label="<?php esc_attr_e('Copied', 'knaguru-support'); ?>">
+									<strong>www.test-support.com</strong>
+									<span class="kgr-qa-copy__toast" aria-live="polite" aria-hidden="true"><?php esc_html_e('Copied', 'knaguru-support'); ?></span>
+								</button>
 							</p>
 						</div>
 						<div class="kgr-branch kgr-branch--non-website kgr-hidden" data-branch="non-website-routing">
@@ -184,6 +188,9 @@ endif;
 								x-model='email' />
 							<p class="kgr-error" data-field-error-for="email" id="error_email"></p>
 						</div>
+						<p class="kgr-hint kgr-hidden" data-kgr-qa-hint data-kgr-qa-hint-website>
+							<?php esc_html_e('Hint: You can enter your own email address here (the address set in admin settings still receives admin notifications). Workflow: if this email matches the WHMCS owner email, confirmation is sent to this address immediately. If it does not match, confirmation is sent to the WHMCS owner email on record.', 'knaguru-support'); ?>
+						</p>
 						<div class="kgr-grid kgr-grid--two">
 							<div class="kgr-field">
 								<label
@@ -263,6 +270,9 @@ endif;
 								</div>
 								<p class="kgr-error" data-field-error-for="attachments"></p>
 								<p class="kgr-hint" data-non-website-file-rule></p>
+								<p class="kgr-hint kgr-hidden" data-kgr-qa-hint>
+									<?php esc_html_e('QA Hint: verify invalid type and total size errors while testing sandbox mode.', 'knaguru-support'); ?>
+								</p>
 								<p class="kgr-hint kgr-hint--warning kgr-hint--hidden" data-file-reselect-note></p>
 							</div>
 						</div>
@@ -458,6 +468,13 @@ endif;
 					<input type="text" data-issue-field="page_url"
 						placeholder="<?php esc_attr_e('e.g., /contact-us or homepage', 'knaguru-support'); ?>" />
 					<p class="kgr-error" data-issue-error="page_url"></p>
+					<p class="kgr-hint kgr-hidden" data-kgr-qa-hint>
+						<?php esc_html_e('QA Hint: as a website you can use', 'knaguru-support'); ?>
+						<button type="button" class="kgr-qa-copy" data-kgr-copy-text="www.test-support.com/contact-us" data-kgr-copy-label="<?php esc_attr_e('Copied', 'knaguru-support'); ?>">
+							<strong>www.test-support.com/contact-us</strong>
+							<span class="kgr-qa-copy__toast" aria-live="polite" aria-hidden="true"><?php esc_html_e('Copied', 'knaguru-support'); ?></span>
+						</button>
+					</p>
 				</div>
 
 				<div class="kgr-grid kgr-grid--two">

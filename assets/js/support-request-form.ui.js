@@ -2,65 +2,12 @@
 ( function () {
 	'use strict';
 
-	const ISSUE_TYPES = {
+	const ISSUE_TYPES = window.KGR_ISSUE_TYPES || {
 		CONTENT: 'Content change',
 		IMAGE: 'Image replacement',
 		FORM: 'Form problem',
 		PERFORMANCE: 'Performance issue',
 		OTHER: 'Other',
-	};
-	
-	window.kgrData = function() {
-		return {
-			service_type: '',
-			website_url: '',
-			email: '',
-			first_name: '',
-			last_name: '',
-			business_name: '',
-			title: '',
-			message: '',
-			attachments: [],
-			issues: [],
-			step_index: 0,
-			// Helpers to avoid WordPress smart quote issues in HTML expressions
-			shouldShowContact() {
-				return this.step_index >= 2;
-			},
-			shouldShowIssues() {
-				return this.step_index >= 3;
-			},
-			isWebsite() {
-				return this.service_type === 'Website';
-			},
-			isNotWebsite() {
-				return this.service_type !== 'Website' && this.service_type !== '';
-			},
-			hasService() {
-				return this.service_type !== '';
-			},
-			getPreviewMessage() {
-				if (!this.message) return '';
-				return this.message.substring(0, 50) + (this.message.length > 50 ? '...' : '');
-			},
-			getScreenshotCount(issue) {
-				return (issue.screenshots || []).length;
-			},
-			hasScreenshots(issue) {
-				return (issue.screenshots || []).length > 0;
-			},
-			getScreenshotLabel(issue) {
-				const count = (issue.screenshots || []).length;
-				return count + (count === 1 ? ' screenshot attached' : ' screenshots attached');
-			},
-			getIssueProblem(issue) {
-				return issue.description || '';
-			},
-			getAttachmentsLabel() {
-				const count = (this.attachments || []).length;
-				return count + (count === 1 ? ' file' : ' files');
-			}
-		};
 	};
 
 	class SupportFormUI {
@@ -99,13 +46,21 @@
 				attachments: [],
 				issues: [],
 				step_index: 0,
+				form_started_at: Math.floor( Date.now() / 1000 ),
 			};
+
+			this.turnstileWidgetId = null;
+			this.validationCache = new Map();
+			this.isInitialized = false;
 		}
 
 
 		init() {
 			const doInit = () => {
 				if ( ! this.root ) {
+					return;
+				}
+				if ( this.isInitialized ) {
 					return;
 				}
 
@@ -117,22 +72,19 @@
 						const alpineState = window.Alpine.$data( el );
 						
 						if ( alpineState ) {
-							console.log( '[KGR] Alpine state found, linking...' );
 							// Sync our initial state into Alpine
 							Object.assign( alpineState, this.state );
 							// Link our state to Alpine's proxy
 							this.state = alpineState;
-						} else {
-							console.warn( '[KGR] Alpine state not found on root element' );
 						}
 					} catch ( e ) {
-						console.error( '[KGR] Alpine data sync failed', e );
 					}
 				}
 
 				if ( ! this.form ) {
 					return;
 				}
+				this.isInitialized = true;
 				
 				if ( this.issuesContainer && this.state.issues && this.state.issues.length === 0 ) {
 					this.addIssue();
@@ -145,6 +97,8 @@
 				this.renderPreview();
 				this.renderReview();
 				this.setHelperText();
+				this.applyQaHintsVisibility();
+				this.initQaHintComponents();
 				this.initCharCounters();
 			};
 
@@ -204,6 +158,7 @@
 				this.state.service_type = input.value;
 				this.applyBranchState();
 				this.updateLayoutMode();
+				this.applyQaHintsVisibility();
 			}
 			if ( name === 'website_url' ) {
 				this.state.website_url = input.value.trim();
@@ -228,7 +183,7 @@
 			}
 			if ( input.id === 'KGR_non_website_files' ) {
 				this.state.attachments = Array.from( input.files || [] );
-				this.renderFileList( input.closest( '.kgr-upload' ), this.state.attachments, 'No files selected yet.' );
+				this.renderFileList( input.closest( '.kgr-upload' ), this.state.attachments, 'No files selected yet.', input );
 			}
 
 			if ( input.hasAttribute( 'data-issue-field' ) ) {
@@ -237,7 +192,7 @@
 				const field = input.getAttribute( 'data-issue-field' );
 				if ( field === 'screenshots' ) {
 					this.state.issues[ index ][ field ] = Array.from( input.files || [] );
-					this.renderFileList( input.closest( '.kgr-upload' ), this.state.issues[ index ].screenshots, 'No screenshots selected yet.' );
+					this.renderFileList( input.closest( '.kgr-upload' ), this.state.issues[ index ].screenshots, 'No screenshots selected yet.', input );
 				} else {
 					this.state.issues[ index ][ field ] = input.value.trim();
 					if ( field === 'issue_type' ) {
@@ -362,8 +317,7 @@
 			this.setSubmitState( 'pending' );
 
 			try {
-				const payload = this.buildPayload();
-				console.log( '[KGR] Submitting payload:', Object.fromEntries( payload.entries() ) );
+				const payload = await this.buildPayload();
 				
 				const response = await this.request( this.config.submitRequestEndpoint, {
 					method: 'POST',
@@ -382,8 +336,9 @@
 					this.showFileReselectHints();
 				}
 			} catch ( error ) {
-				this.setSubmitState( 'error', this.config.i18n.genericError );
-				this.showAlert( 'error', this.config.i18n.genericError );
+				const message = error && error.message ? error.message : this.config.i18n.genericError;
+				this.setSubmitState( 'error', message );
+				this.showAlert( 'error', message );
 				this.showFileReselectHints();
 			} finally {
 				this.setSubmittingState( false );
@@ -428,23 +383,40 @@
 			}
 
 			this.resetValidationActions();
+			const normalizedWebsite = this.normalizeUrlInput( this.state.website_url );
+			const cacheKey = normalizedWebsite.toLowerCase();
+			const cached = this.validationCache.get( cacheKey );
+			if ( cached ) {
+				if ( cached.success ) {
+					return true;
+				}
+				const cachedMsg = cached.message || this.config.i18n.websiteNotFound;
+				this.setFieldError( 'website_url', cachedMsg );
+				this.showAlert( 'error', cachedMsg );
+				this.handleWebsiteNotFound( cachedMsg );
+				return false;
+			}
 
 			try {
 				const response = await this.request( this.config.validateWebsiteEndpoint, {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
 					body: JSON.stringify( { website_url: this.state.website_url, service_type: this.state.service_type } ),
+					timeoutMs: this.config.validateRequestTimeoutMs || 12000,
 				} );
 				if ( response.success ) {
+					this.validationCache.set( cacheKey, { success: true, message: '' } );
 					return true;
 				}
 				const msg = response.message || this.config.i18n.websiteNotFound;
+				this.validationCache.set( cacheKey, { success: false, message: msg } );
 				this.setFieldError( 'website_url', msg );
 				this.showAlert( 'error', msg );
 				this.handleWebsiteNotFound( msg );
 				return false;
 			} catch ( error ) {
 				const msg = error.message || this.config.i18n.genericError;
+				this.validationCache.set( cacheKey, { success: false, message: msg } );
 				this.setFieldError( 'website_url', msg );
 				this.showAlert( 'error', msg );
 				this.handleWebsiteNotFound( msg );
@@ -565,9 +537,8 @@
 			const maxScreenshotSize = ( this.config.maxScreenshotMb || 1 ) * 1024 * 1024;
 
 			this.state.issues.forEach( ( issue, index ) => {
-				console.log( `[KGR] Validating issue ${ index }`, issue );
 				const normalizedPageUrl = this.normalizeUrlInput( issue.page_url );
-				if ( ! normalizedPageUrl ) {
+				if ( ! this.isValidWebsiteInput( issue.page_url, true ) || ! normalizedPageUrl ) {
 					this.setIssueError( index, 'page_url', 'Please add a valid page URL.' );
 					valid = false;
 				} else {
@@ -610,6 +581,10 @@
 						valid = false;
 					}
 				}
+				if ( issue.issue_type === ISSUE_TYPES.OTHER && (issue.screenshots || []).length === 0 ) {
+					this.setIssueError( index, 'screenshots', 'Please upload at least one screenshot for "Other" issues.' );
+					valid = false;
+				}
 
 				const shots = issue.screenshots || [];
 				if ( shots.length > maxScreenshots ) {
@@ -637,13 +612,8 @@
 					this.setIssueError( index, 'screenshots', `Each screenshot must be under ${ this.config.maxScreenshotMb || 1 }MB.` );
 					valid = false;
 				}
-				if ( issue.issue_type === ISSUE_TYPES.FORM && shots.length === 0 ) {
-					this.setIssueError( index, 'screenshots', 'Screenshot is required for form problems.' );
-					valid = false;
-				}
 			} );
 
-			console.log( '[KGR] Validation result:', valid );
 			return valid;
 		}
 
@@ -839,6 +809,7 @@
 
 			const isContent = issue.issue_type === ISSUE_TYPES.CONTENT;
 			const isImage = issue.issue_type === ISSUE_TYPES.IMAGE;
+			const isOther = issue.issue_type === ISSUE_TYPES.OTHER;
 
 			if ( content ) content.classList.toggle( 'kgr-hidden', ! isContent );
 			if ( image ) image.classList.toggle( 'kgr-hidden', ! isImage );
@@ -847,7 +818,11 @@
 				screenshots.classList.toggle( 'kgr-hidden', isImage );
 				const label = screenshots.querySelector( 'label' );
 				if ( label ) {
-					label.textContent = isContent ? 'Upload files (optional)' : 'Upload screenshots (optional)';
+					if ( isOther ) {
+						label.textContent = 'Upload screenshots (required)';
+					} else {
+						label.textContent = isContent ? 'Upload files (optional)' : 'Upload screenshots (optional)';
+					}
 				}
 				const fileInput = screenshots.querySelector( 'input[type="file"]' );
 				if ( fileInput ) {
@@ -855,12 +830,18 @@
 				}
 				const hint = screenshots.querySelector( '.kgr-hint:not([data-file-reselect-note])' );
 				if ( hint ) {
-					hint.textContent = isContent ? 'Accepted: Images, PDF, Word, ZIP.' : '';
+					if ( isContent ) {
+						hint.textContent = 'Accepted: Images, PDF, Word, ZIP.';
+					} else if ( isOther ) {
+						hint.textContent = 'At least one image screenshot is required.';
+					} else {
+						hint.textContent = '';
+					}
 				}
 			}
 		}
 
-		buildPayload() {
+		async buildPayload() {
 			const formData = new FormData();
 			
 			// 1. Get raw data from state to bypass Alpine's Proxy system
@@ -910,6 +891,19 @@
 				( rawState.attachments || [] ).forEach( ( file ) => formData.append( 'attachments[]', file ) );
 			}
 
+			if ( window.KGRFormSecurity && typeof window.KGRFormSecurity.appendSecurityPayload === 'function' ) {
+				await window.KGRFormSecurity.appendSecurityPayload( this.form, this.config, rawState, this, formData );
+			}
+
+			if ( this.config.captchaDebug ) {
+				const token = formData.get( 'captcha_token' );
+				console.log( '[Captcha Debug] FormData construction complete', {
+					has_captcha_token: !! token,
+					captcha_token_length: token ? token.length : 0,
+					payload_keys: Array.from( formData.keys() )
+				} );
+			}
+
 			return formData;
 		}
 
@@ -917,7 +911,7 @@
 			if ( ! url || url === '#' ) {
 				throw new Error( 'Configuration error: Invalid API endpoint.' );
 			}
-			const timeout = this.config.requestTimeoutMs || 25000;
+			const timeout = options && options.timeoutMs ? options.timeoutMs : ( this.config.requestTimeoutMs || 25000 );
 			const controller = new AbortController();
 			const timer = window.setTimeout( () => controller.abort(), timeout );
 			try {
@@ -928,9 +922,6 @@
 					data = JSON.parse( text );
 				} catch ( parseError ) {
 					throw new Error( `Invalid JSON response (${ response.status }): ${ text.slice( 0, 180 ) }` );
-				}
-				if ( ! response.ok && data && data.message ) {
-					throw new Error( data.message );
 				}
 				return data;
 			} finally {
@@ -991,8 +982,8 @@
 			if ( ! card ) {
 				return;
 			}
-			const input = card.querySelector( `[data-issue-field="${ field }"]` );
-			const error = card.querySelector( `[data-issue-error="${ field }"]` );
+			const input = this.getIssueFieldNode( card, field );
+			const error = this.getIssueErrorNode( card, field, input );
 			if ( error ) {
 				error.textContent = message;
 			}
@@ -1018,11 +1009,36 @@
 			const issueField = input.getAttribute( 'data-issue-field' );
 			if ( issueField ) {
 				const card = input.closest( '[data-issue-card]' );
-				const error = card.querySelector( `[data-issue-error="${ issueField }"]` );
+				const error = this.getIssueErrorNode( card, issueField, input );
 				if ( error ) {
 					error.textContent = '';
 				}
 			}
+		}
+
+		getIssueFieldNode( card, field ) {
+			const nodes = Array.from( card.querySelectorAll( `[data-issue-field="${ field }"]` ) );
+			if ( nodes.length <= 1 ) {
+				return nodes[0] || null;
+			}
+
+			return nodes.find( ( node ) => !node.closest( '.kgr-hidden' ) ) || nodes[0] || null;
+		}
+
+		getIssueErrorNode( card, field, input = null ) {
+			if ( input ) {
+				const localError = input.closest( '.kgr-field, .kgr-field-sub' )?.querySelector( `[data-issue-error="${ field }"]` );
+				if ( localError ) {
+					return localError;
+				}
+			}
+
+			const nodes = Array.from( card.querySelectorAll( `[data-issue-error="${ field }"]` ) );
+			if ( nodes.length <= 1 ) {
+				return nodes[0] || null;
+			}
+
+			return nodes.find( ( node ) => !node.closest( '.kgr-hidden' ) ) || nodes[0] || null;
 		}
 
 		clearErrors() {
@@ -1074,7 +1090,7 @@
 				return;
 			}
 			if ( mode === 'success' ) {
-				this.submitStateIcon.textContent = '✓';
+				this.submitStateIcon.textContent = '\u2713';
 				this.submitStateTitle.textContent = 'Request submitted successfully';
 				this.submitStateMessage.textContent = message || 'We sent your request. Please check your inbox for confirmation.';
 				return;
@@ -1084,21 +1100,115 @@
 			this.submitStateMessage.textContent = message || this.config.i18n.genericError;
 		}
 
-		renderFileList( uploadWrap, files, emptyText ) {
+		renderFileList( uploadWrap, files, emptyText, input = null ) {
 			if ( ! uploadWrap ) {
 				return;
 			}
+			const previewBox = uploadWrap.querySelector( '[data-preview-container]' );
 			const output = uploadWrap.querySelector( '[data-file-list]' );
-			if ( ! output ) {
+
+			if ( output ) {
+				if ( ! files.length ) {
+					output.textContent = emptyText;
+				} else {
+					const names = files.slice( 0, 3 ).map( ( file ) => file.name );
+					const suffix = files.length > 3 ? ` +${ files.length - 3 } more` : '';
+					output.textContent = `${ files.length } file(s): ${ names.join( ', ' ) }${ suffix }`;
+				}
+			}
+
+			if ( ! previewBox ) {
 				return;
 			}
+
+			previewBox.innerHTML = '';
 			if ( ! files.length ) {
-				output.textContent = emptyText;
 				return;
 			}
-			const names = files.slice( 0, 3 ).map( ( file ) => file.name );
-			const suffix = files.length > 3 ? ` +${ files.length - 3 } more` : '';
-			output.textContent = `${ files.length } file(s): ${ names.join( ', ' ) }${ suffix }`;
+
+			previewBox.style.display = 'flex';
+			previewBox.style.flexWrap = 'wrap';
+			previewBox.style.gap = '10px';
+			previewBox.style.marginTop = '10px';
+
+			files.forEach( ( file, fileIndex ) => {
+				const item = document.createElement( 'div' );
+				item.style.position = 'relative';
+				item.style.width = '88px';
+				item.style.height = '88px';
+				item.style.border = '1px solid #e2e8f0';
+				item.style.borderRadius = '8px';
+				item.style.background = '#f8fafc';
+				item.style.overflow = 'hidden';
+				item.style.display = 'flex';
+				item.style.alignItems = 'center';
+				item.style.justifyContent = 'center';
+
+				const removeBtn = document.createElement( 'button' );
+				removeBtn.type = 'button';
+				removeBtn.setAttribute( 'aria-label', `Remove ${ file.name }` );
+				removeBtn.textContent = '×';
+				removeBtn.style.position = 'absolute';
+				removeBtn.style.top = '6px';
+				removeBtn.style.right = '6px';
+				removeBtn.style.width = '20px';
+				removeBtn.style.height = '20px';
+				removeBtn.style.border = 'none';
+				removeBtn.style.borderRadius = '50%';
+				removeBtn.style.background = '#dc2626';
+				removeBtn.style.color = '#ffffff';
+				removeBtn.style.cursor = 'pointer';
+				removeBtn.style.fontSize = '16px';
+				removeBtn.style.fontWeight = '700';
+				removeBtn.style.lineHeight = '18px';
+				removeBtn.style.padding = '0';
+				removeBtn.style.zIndex = '2';
+
+				removeBtn.addEventListener( 'click', () => {
+					files.splice( fileIndex, 1 );
+					this.syncInputFilesFromArray( input, files );
+					this.renderFileList( uploadWrap, files, emptyText, input );
+					this.clearAlert();
+					this.renderPreview();
+					this.renderReview();
+				} );
+
+				if ( file.type && file.type.startsWith( 'image/' ) ) {
+					const img = document.createElement( 'img' );
+					img.src = URL.createObjectURL( file );
+					img.alt = file.name;
+					img.style.width = '100%';
+					img.style.height = '100%';
+					img.style.objectFit = 'cover';
+					item.appendChild( img );
+				} else {
+					const ext = ( file.name.split( '.' ).pop() || 'FILE' ).toUpperCase();
+					const extLabel = document.createElement( 'span' );
+					extLabel.textContent = ext;
+					extLabel.style.fontSize = '12px';
+					extLabel.style.fontWeight = '700';
+					extLabel.style.color = '#334155';
+					item.appendChild( extLabel );
+				}
+
+				item.appendChild( removeBtn );
+				previewBox.appendChild( item );
+			} );
+		}
+
+		syncInputFilesFromArray( input, files ) {
+			if ( ! input ) {
+				return;
+			}
+			try {
+				const dt = new DataTransfer();
+				files.forEach( ( file ) => dt.items.add( file ) );
+				input.files = dt.files;
+			} catch ( error ) {
+				if ( files.length === 0 ) {
+					input.value = '';
+				}
+			}
 		}
 
 		setHelperText( scope ) {
@@ -1109,6 +1219,82 @@
 			target.querySelectorAll( '[data-non-website-file-rule]' ).forEach( ( node ) => {
 				node.textContent = this.config.i18n.nonWebsiteUploadRule || 'Accepted files up to total 10MB.';
 			} );
+		}
+
+		applyQaHintsVisibility() {
+			const enabled = !! this.config.qaHintsEnabled;
+			this.root.querySelectorAll( '[data-kgr-qa-hint]' ).forEach( ( node ) => {
+				const websiteOnly = node.hasAttribute( 'data-kgr-qa-hint-website' );
+				const showForWebsite = ! websiteOnly || this.state.service_type === 'Website';
+				node.classList.toggle( 'kgr-hidden', ! enabled || ! showForWebsite );
+			} );
+		}
+
+		initQaHintComponents() {
+			this.root.querySelectorAll( '[data-kgr-copy-text]' ).forEach( ( node ) => {
+				if ( node.dataset.kgrCopyBound === '1' ) {
+					return;
+				}
+				node.dataset.kgrCopyBound = '1';
+				node.addEventListener( 'click', async ( event ) => {
+					event.preventDefault();
+					const text = ( node.getAttribute( 'data-kgr-copy-text' ) || '' ).trim();
+					if ( ! text ) {
+						return;
+					}
+					const copied = await this.copyTextToClipboard( text );
+					if ( copied ) {
+						this.showCopyToast( node );
+					}
+				} );
+			} );
+		}
+
+		async copyTextToClipboard( text ) {
+			try {
+				if ( navigator.clipboard && typeof navigator.clipboard.writeText === 'function' ) {
+					await navigator.clipboard.writeText( text );
+					return true;
+				}
+			} catch ( error ) {
+				// fall through to legacy method
+			}
+
+			try {
+				const ta = document.createElement( 'textarea' );
+				ta.value = text;
+				ta.setAttribute( 'readonly', 'readonly' );
+				ta.style.position = 'fixed';
+				ta.style.left = '-9999px';
+				document.body.appendChild( ta );
+				ta.select();
+				ta.setSelectionRange( 0, ta.value.length );
+				const ok = document.execCommand( 'copy' );
+				document.body.removeChild( ta );
+				return !! ok;
+			} catch ( error ) {
+				return false;
+			}
+		}
+
+		showCopyToast( node ) {
+			const toast = node.querySelector( '.kgr-qa-copy__toast' );
+			if ( ! toast ) {
+				return;
+			}
+			const label = node.getAttribute( 'data-kgr-copy-label' );
+			if ( label ) {
+				toast.textContent = label;
+			}
+			toast.classList.add( 'is-visible' );
+			toast.setAttribute( 'aria-hidden', 'false' );
+			if ( node._kgrCopyToastTimer ) {
+				window.clearTimeout( node._kgrCopyToastTimer );
+			}
+			node._kgrCopyToastTimer = window.setTimeout( () => {
+				toast.classList.remove( 'is-visible' );
+				toast.setAttribute( 'aria-hidden', 'true' );
+			}, 2000 );
 		}
 
 		renderPreview() {
@@ -1172,32 +1358,39 @@
 			}
 		}
 
-		isValidWebsiteInput( value ) {
-			const input = ( value || '' ).trim().toLowerCase();
-			if ( ! input ) {
-				return false;
-			}
-			
-			const withScheme = input.includes( '://' ) ? input : `https://${ input }`;
-			try {
-				const parsed = new URL( withScheme );
-				const host = ( parsed.hostname || '' ).replace( /^www\./, '' );
-				// Enforce pattern: something.tld (at least one dot and 2+ char TLD)
-				return /^[a-z0-9.-]+\.[a-z]{2,}$/i.test( host );
-			} catch ( error ) {
-				return false;
-			}
+		isValidWebsiteInput( value, allowWildcardPath = false ) {
+			return this.normalizeWebsiteInput( value, allowWildcardPath ) !== '';
 		}
 
 		normalizeUrlInput( value ) {
+			return this.normalizeWebsiteInput( value, true );
+		}
+
+		normalizeWebsiteInput( value, allowWildcardPath = false ) {
 			const input = ( value || '' ).trim();
 			if ( ! input ) {
 				return '';
 			}
-			const withScheme = input.includes( '://' ) ? input : `https://${ input }`;
+
+			const hasWildcardPath = allowWildcardPath && /\/\*$/.test( input );
+			const candidate = hasWildcardPath ? input.replace( /\/\*$/, '/' ) : input;
+			const withScheme = candidate.includes( '://' ) ? candidate : `https://${ candidate }`;
+
 			try {
 				const parsed = new URL( withScheme );
-				return parsed.toString();
+				if ( parsed.protocol !== 'https:' && parsed.protocol !== 'http:' ) {
+					return '';
+				}
+				const host = ( parsed.hostname || '' ).replace( /^www\./, '' );
+				if ( ! /^[a-z0-9.-]+\.[a-z]{2,}$/i.test( host ) ) {
+					return '';
+				}
+
+				let normalized = parsed.toString();
+				if ( hasWildcardPath ) {
+					normalized = normalized.replace( /\/$/, '' ) + '/*';
+				}
+				return normalized;
 			} catch ( error ) {
 				return '';
 			}

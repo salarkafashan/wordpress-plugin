@@ -23,6 +23,19 @@ $has_cf_site_key = !empty($settings['captcha']['cloudflare_turnstile_site_key'])
 $has_cf_secret = !empty($settings['captcha']['cloudflare_turnstile_secret_key']);
 $has_google_site_key = !empty($settings['captcha']['google_recaptcha_site_key']);
 $has_google_secret = !empty($settings['captcha']['google_recaptcha_secret_key']);
+$has_google_enterprise_site_key = !empty($settings['captcha']['google_recaptcha_enterprise_site_key']);
+$has_google_enterprise_api_key = !empty($settings['captcha']['google_recaptcha_enterprise_api_key']);
+$jira_token_expires_on_raw = (string) ($settings['jira']['jira_api_token_expires_on'] ?? '');
+$jira_token_expires_on = \SupportRequestFrontend\Includes\AdminController::normalize_jira_token_expiry_date($jira_token_expires_on_raw);
+$jira_token_health = get_option('kgr_jira_token_health', []);
+$jira_days_left = is_array($jira_token_health) && isset($jira_token_health['days_left']) && is_numeric($jira_token_health['days_left']) ? (int) $jira_token_health['days_left'] : null;
+if ($jira_days_left === null && $jira_token_expires_on !== '') {
+    $today = new \DateTimeImmutable(wp_date('Y-m-d'));
+    $expiry = \DateTimeImmutable::createFromFormat('Y-m-d', $jira_token_expires_on);
+    if ($expiry instanceof \DateTimeImmutable) {
+        $jira_days_left = (int) $today->diff($expiry)->format('%r%a');
+    }
+}
 ?>
 
 <div class="kgr-admin-wrap" x-data="kgrSettings">
@@ -63,6 +76,18 @@ $has_google_secret = !empty($settings['captcha']['google_recaptcha_secret_key'])
                         <p class="kgr-admin-help">Using commas you can add multiple recipients.</p>
                         <p x-show="generalErrors.admin_emails" x-text="generalErrors.admin_emails" style="color:#d9534f; font-size:12px; margin:4px 0 0 0;"></p>
                     </div>
+
+                    <div class="kgr-admin-field">
+                        <label>Queue Cron Interval</label>
+                        <select name="general[queue_cron_interval]">
+                            <option value="kgr_every_minute" <?php selected($settings['general']['queue_cron_interval'] ?? 'kgr_every_15_minutes', 'kgr_every_minute'); ?>>Every minute (not recommended on low-traffic sites)</option>
+                            <option value="kgr_every_5_minutes" <?php selected($settings['general']['queue_cron_interval'] ?? 'kgr_every_15_minutes', 'kgr_every_5_minutes'); ?>>Every 5 minutes</option>
+                            <option value="kgr_every_15_minutes" <?php selected($settings['general']['queue_cron_interval'] ?? 'kgr_every_15_minutes', 'kgr_every_15_minutes'); ?>>Every 15 minutes (recommended)</option>
+                            <option value="kgr_every_30_minutes" <?php selected($settings['general']['queue_cron_interval'] ?? 'kgr_every_15_minutes', 'kgr_every_30_minutes'); ?>>Every 30 minutes</option>
+                            <option value="hourly" <?php selected($settings['general']['queue_cron_interval'] ?? 'kgr_every_15_minutes', 'hourly'); ?>>Hourly</option>
+                        </select>
+                        <p class="kgr-admin-help">Used by queue processing cron. On low-traffic websites, 15-30 minutes is usually best.</p>
+                    </div>
                 </div>
                 <div>
                     <h3> sandbox Environment</h3>
@@ -85,6 +110,18 @@ $has_google_secret = !empty($settings['captcha']['google_recaptcha_secret_key'])
                                :required="testingMode === 'on'">
                         <p class="kgr-admin-help">Using commas you can add multiple recipients.</p>
                         <p x-show="generalErrors.test_emails" x-text="generalErrors.test_emails" style="color:#d9534f; font-size:12px; margin:4px 0 0 0;"></p>
+                    </div>
+
+                    <div class="kgr-admin-field" x-show="testingMode === 'on'" x-transition>
+                        <input type="hidden" name="general[qa_hints_enabled]" value="0">
+                        <label class="kgr-checkbox-row" style="display:flex; align-items:center; gap:8px; font-weight:500;">
+                            <input class="kgr-checkbox-input" type="checkbox" name="general[qa_hints_enabled]" value="1" x-model="qaHintsEnabled"
+                                <?php checked((string)($settings['general']['qa_hints_enabled'] ?? '0'), '1'); ?>>
+                            QA Frontend Hints
+                            <span class="kgr-info-tip" tabindex="0" aria-label="QA hints help">i
+                                <span class="kgr-info-tip__box">When enabled, helpful QA hints appear on the frontend form to assist testing and review. Disable it for clean production UX.</span>
+                            </span>
+                        </label>
                     </div>
                 </div>
             </div>
@@ -205,17 +242,18 @@ $has_google_secret = !empty($settings['captcha']['google_recaptcha_secret_key'])
                             placeholder="KSR">
                         <p class="kgr-admin-help">Used only for backward compatibility; mapped mode expects explicit client mappings.</p>
                     </div>
-
-                    <div class="kgr-admin-field">
-                        <label>API User (Email)</label>
-                        <input type="email" name="jira[jira_api_user]"
-                            value="<?php echo esc_attr($settings['jira']['jira_api_user'] ?? ''); ?>">
-                    </div>
                 </div>
                 <div>
                     <h3>Auth & Webhooks</h3>
                     <div class="kgr-admin-field">
-                        <label>API Token</label>
+                        <label>API Token
+                            <?php if ($jira_token_expires_on !== ''): ?>
+                                <span style="display:inline-block; margin-left:8px; color:#b91c1c; font-weight:700; font-size:12px;">Expires on: <?php echo esc_html($jira_token_expires_on); ?></span>
+                            <?php endif; ?>
+                            <?php if ($jira_days_left !== null): ?>
+                                <span style="display:inline-block; margin-left:8px; color:#b91c1c; font-weight:700; font-size:12px;">Days left: <?php echo esc_html((string) $jira_days_left); ?></span>
+                            <?php endif; ?>
+                        </label>
                         <div class="kgr-admin-help" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
                             <span x-text="credentialStatus('jira_api_token', <?php echo $has_jira_token ? 'true' : 'false'; ?>)"></span>
                             <button type="button" class="kgr-btn" @click="toggleCredentialEdit('jira_api_token')">
@@ -225,6 +263,11 @@ $has_google_secret = !empty($settings['captcha']['google_recaptcha_secret_key'])
                         <input type="password" name="jira[jira_api_token]" x-show="credentialEditing.jira_api_token"
                             value="" autocomplete="new-password" placeholder="Enter a new Jira API token">
                         <span class="kgr-admin-help">Click Replace token, enter new value, then click Save All Settings. If hidden, current token stays unchanged.</span>
+                    </div>
+                    <div class="kgr-admin-field" x-show="credentialEditing.jira_api_token">
+                        <label>Token Expires On</label>
+                        <input type="date" name="jira[jira_api_token_expires_on]" value="<?php echo esc_attr($jira_token_expires_on); ?>">
+                        <span class="kgr-admin-help">Set Jira API token expiry date (YYYY-MM-DD) for proactive alerts.</span>
                     </div>
                     <div class="kgr-admin-field">
                         <label>Webhook Secret</label>
@@ -242,6 +285,11 @@ $has_google_secret = !empty($settings['captcha']['google_recaptcha_secret_key'])
                             value="" autocomplete="new-password" placeholder="Enter a new Jira webhook secret">
                         <span class="kgr-admin-help">Click Replace secret, enter new value, then click Save All Settings. If hidden, current secret stays unchanged.</span>
                     </div>
+                    <div class="kgr-admin-field">
+                        <label>API User (Email)</label>
+                        <input type="email" name="jira[jira_api_user]"
+                            value="<?php echo esc_attr($settings['jira']['jira_api_user'] ?? ''); ?>">
+                    </div>
                 </div>
             </div>
 
@@ -251,7 +299,7 @@ $has_google_secret = !empty($settings['captcha']['google_recaptcha_secret_key'])
                     <h3>Global Security</h3>
                     <div class="kgr-admin-field">
                         <label>Active Captcha Provider</label>
-                        <select name="captcha[captcha_provider]">
+                        <select name="captcha[captcha_provider]" x-model="captchaProvider">
                             <option value="cloudflare" <?php selected($settings['captcha']['captcha_provider'] ?? 'cloudflare', 'cloudflare'); ?>>Cloudflare Turnstile (Recommended)</option>
                             <option value="google" <?php selected($settings['captcha']['captcha_provider'] ?? 'cloudflare', 'google'); ?>>Google reCAPTCHA v3</option>
                             <option value="none" <?php selected($settings['captcha']['captcha_provider'] ?? 'cloudflare', 'none'); ?>>None (Not Recommended)</option>
@@ -270,69 +318,107 @@ $has_google_secret = !empty($settings['captcha']['google_recaptcha_secret_key'])
                 <div>
                     <h3>Provider Details</h3>
                     <div>
-                        <h4 style="margin-top:0">Cloudflare Turnstile</h4>
-                        <div class="kgr-admin-help" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
-                            <button type="button" class="kgr-btn" :disabled="testingCloudflare" @click="testCloudflareCredentials()">
-                                <span x-show="!testingCloudflare">Test Cloudflare Keys</span>
-                                <span x-show="testingCloudflare">Testing...</span>
-                            </button>
-                        </div>
-                        <div class="kgr-admin-grid" style="grid-template-columns: 1fr 1fr; gap: 10px;">
-                            <div class="kgr-admin-field">
-                                <label>Site Key</label>
-                                <div class="kgr-admin-help" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
-                                    <span x-text="credentialStatus('cloudflare_turnstile_site_key', <?php echo $has_cf_site_key ? 'true' : 'false'; ?>)"></span>
-                                    <button type="button" class="kgr-btn" @click="toggleCredentialEdit('cloudflare_turnstile_site_key')">
-                                        <span x-text="credentialEditing.cloudflare_turnstile_site_key ? 'Cancel' : 'Replace key'"></span>
-                                    </button>
-                                </div>
-                                <input type="text" name="captcha[cloudflare_turnstile_site_key]" x-show="credentialEditing.cloudflare_turnstile_site_key" value="" placeholder="Enter a new Cloudflare site key">
+                        <div style="border: 1px solid lightgray; padding:10px; border-radius:8px;">
+                            <h4 style="margin-top:0">Cloudflare Turnstile</h4>
+                            <div class="kgr-admin-help" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+                                <button type="button" class="kgr-btn" :disabled="testingCloudflare" @click="testCloudflareCredentials()">
+                                    <span x-show="!testingCloudflare">Test Cloudflare Keys</span>
+                                    <span x-show="testingCloudflare">Testing...</span>
+                                </button>
                             </div>
-                            <div class="kgr-admin-field">
-                                <label>Secret Key</label>
-                                <div class="kgr-admin-help" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
-                                    <span x-text="credentialStatus('cloudflare_turnstile_secret_key', <?php echo $has_cf_secret ? 'true' : 'false'; ?>)"></span>
-                                    <button type="button" class="kgr-btn" @click="toggleCredentialEdit('cloudflare_turnstile_secret_key')">
-                                        <span x-text="credentialEditing.cloudflare_turnstile_secret_key ? 'Cancel' : 'Replace secret'"></span>
-                                    </button>
+                            <div class="kgr-admin-grid" style="grid-template-columns: 1fr 1fr; gap: 10px;">
+                                <div class="kgr-admin-field">
+                                    <label>Site Key</label>
+                                    <div class="kgr-admin-help" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+                                        <span x-text="credentialStatus('cloudflare_turnstile_site_key', <?php echo $has_cf_site_key ? 'true' : 'false'; ?>)"></span>
+                                        <button type="button" class="kgr-btn" @click="toggleCredentialEdit('cloudflare_turnstile_site_key')">
+                                            <span x-text="credentialEditing.cloudflare_turnstile_site_key ? 'Cancel' : 'Replace key'"></span>
+                                        </button>
+                                    </div>
+                                    <input type="text" name="captcha[cloudflare_turnstile_site_key]" x-show="credentialEditing.cloudflare_turnstile_site_key" value="" placeholder="Enter a new Cloudflare site key">
                                 </div>
-                                <input type="password" name="captcha[cloudflare_turnstile_secret_key]" x-show="credentialEditing.cloudflare_turnstile_secret_key" value="" autocomplete="new-password" placeholder="Enter a new Cloudflare secret key">
+                                <div class="kgr-admin-field">
+                                    <label>Secret Key</label>
+                                    <div class="kgr-admin-help" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+                                        <span x-text="credentialStatus('cloudflare_turnstile_secret_key', <?php echo $has_cf_secret ? 'true' : 'false'; ?>)"></span>
+                                        <button type="button" class="kgr-btn" @click="toggleCredentialEdit('cloudflare_turnstile_secret_key')">
+                                            <span x-text="credentialEditing.cloudflare_turnstile_secret_key ? 'Cancel' : 'Replace secret'"></span>
+                                        </button>
+                                    </div>
+                                    <input type="password" name="captcha[cloudflare_turnstile_secret_key]" x-show="credentialEditing.cloudflare_turnstile_secret_key" value="" autocomplete="new-password" placeholder="Enter a new Cloudflare secret key">
+                                </div>
                             </div>
                         </div>
 
-                        <h4 style="margin-top:1.5rem">Google reCAPTCHA v3</h4>
-                        <div class="kgr-admin-help" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
-                            <button type="button" class="kgr-btn" :disabled="testingGoogle" @click="testGoogleCredentials()">
-                                <span x-show="!testingGoogle">Test Google Keys</span>
-                                <span x-show="testingGoogle">Testing...</span>
-                            </button>
-                        </div>
-                        <div class="kgr-admin-grid" style="grid-template-columns: 1fr 1fr; gap: 10px;">
-                            <div class="kgr-admin-field">
-                                <label>Site Key</label>
-                                <div class="kgr-admin-help" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
-                                    <span x-text="credentialStatus('google_recaptcha_site_key', <?php echo $has_google_site_key ? 'true' : 'false'; ?>)"></span>
-                                    <button type="button" class="kgr-btn" @click="toggleCredentialEdit('google_recaptcha_site_key')">
-                                        <span x-text="credentialEditing.google_recaptcha_site_key ? 'Cancel' : 'Replace key'"></span>
-                                    </button>
-                                </div>
-                                <input type="text" name="captcha[google_recaptcha_site_key]" x-show="credentialEditing.google_recaptcha_site_key" value="" placeholder="Enter a new Google site key">
+                        <div style="border: 1px solid lightgray; padding:10px; border-radius:8px; margin-top: 1rem;">
+                            <h4 style="margin-top:1.5rem">Google reCAPTCHA</h4>
+                            <div class="kgr-admin-help" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+                                <button type="button" class="kgr-btn" :disabled="testingGoogle" @click="testGoogleCredentials()">
+                                    <span x-show="!testingGoogle">Test Google Keys</span>
+                                    <span x-show="testingGoogle">Testing...</span>
+                                </button>
                             </div>
                             <div class="kgr-admin-field">
-                                <label>Secret Key</label>
-                                <div class="kgr-admin-help" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
-                                    <span x-text="credentialStatus('google_recaptcha_secret_key', <?php echo $has_google_secret ? 'true' : 'false'; ?>)"></span>
-                                    <button type="button" class="kgr-btn" @click="toggleCredentialEdit('google_recaptcha_secret_key')">
-                                        <span x-text="credentialEditing.google_recaptcha_secret_key ? 'Cancel' : 'Replace secret'"></span>
-                                    </button>
-                                </div>
-                                <input type="password" name="captcha[google_recaptcha_secret_key]" x-show="credentialEditing.google_recaptcha_secret_key" value="" autocomplete="new-password" placeholder="Enter a new Google secret key">
+                                <label>Google reCAPTCHA Type</label>
+                                <select name="captcha[google_recaptcha_type]" x-model="googleRecaptchaType">
+                                    <option value="classic" <?php selected($settings['captcha']['google_recaptcha_type'] ?? 'classic', 'classic'); ?>>Classic reCAPTCHA v3</option>
+                                    <option value="enterprise" <?php selected($settings['captcha']['google_recaptcha_type'] ?? 'classic', 'enterprise'); ?>>reCAPTCHA Enterprise</option>
+                                </select>
+                                <p class="kgr-admin-help">Classic and Enterprise credentials are not interchangeable. Choose the type that matches the keys created in Google.</p>
                             </div>
-                        </div>
-                        <div class="kgr-admin-field">
-                            <label>Minimum Score (0.1 - 1.0)</label>
-                            <input type="number" step="0.1" name="captcha[google_recaptcha_min_score]"
-                                value="<?php echo esc_attr($settings['captcha']['google_recaptcha_min_score'] ?? '0.5'); ?>">
+                            <div class="kgr-admin-grid" style="grid-template-columns: 1fr 1fr; gap: 10px;">
+                                <div class="kgr-admin-field" x-show="googleRecaptchaType === 'classic'">
+                                    <label>Classic Site Key</label>
+                                    <div class="kgr-admin-help" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+                                        <span x-text="credentialStatus('google_recaptcha_site_key', <?php echo $has_google_site_key ? 'true' : 'false'; ?>)"></span>
+                                        <button type="button" class="kgr-btn" @click="toggleCredentialEdit('google_recaptcha_site_key')">
+                                            <span x-text="credentialEditing.google_recaptcha_site_key ? 'Cancel' : 'Replace key'"></span>
+                                        </button>
+                                    </div>
+                                    <input type="text" name="captcha[google_recaptcha_site_key]" x-show="credentialEditing.google_recaptcha_site_key" value="" placeholder="Enter a new Classic site key">
+                                </div>
+                                <div class="kgr-admin-field" x-show="googleRecaptchaType === 'classic'">
+                                    <label>Classic Secret Key</label>
+                                    <div class="kgr-admin-help" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+                                        <span x-text="credentialStatus('google_recaptcha_secret_key', <?php echo $has_google_secret ? 'true' : 'false'; ?>)"></span>
+                                        <button type="button" class="kgr-btn" @click="toggleCredentialEdit('google_recaptcha_secret_key')">
+                                            <span x-text="credentialEditing.google_recaptcha_secret_key ? 'Cancel' : 'Replace secret'"></span>
+                                        </button>
+                                    </div>
+                                    <input type="password" name="captcha[google_recaptcha_secret_key]" x-show="credentialEditing.google_recaptcha_secret_key" value="" autocomplete="new-password" placeholder="Enter a new Google secret key">
+                                </div>
+                                <div class="kgr-admin-field" x-show="googleRecaptchaType === 'enterprise'">
+                                    <label>Enterprise Project ID</label>
+                                    <input type="text" name="captcha[google_recaptcha_enterprise_project_id]"
+                                        value="<?php echo esc_attr($settings['captcha']['google_recaptcha_enterprise_project_id'] ?? ''); ?>"
+                                        placeholder="kanguru-1725557056933">
+                                </div>
+                                <div class="kgr-admin-field" x-show="googleRecaptchaType === 'enterprise'">
+                                    <label>Enterprise Site Key</label>
+                                    <div class="kgr-admin-help" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+                                        <span x-text="credentialStatus('google_recaptcha_enterprise_site_key', <?php echo $has_google_enterprise_site_key ? 'true' : 'false'; ?>)"></span>
+                                        <button type="button" class="kgr-btn" @click="toggleCredentialEdit('google_recaptcha_enterprise_site_key')">
+                                            <span x-text="credentialEditing.google_recaptcha_enterprise_site_key ? 'Cancel' : 'Replace site key'"></span>
+                                        </button>
+                                    </div>
+                                    <input type="text" name="captcha[google_recaptcha_enterprise_site_key]" x-show="credentialEditing.google_recaptcha_enterprise_site_key" value="" placeholder="Enter an Enterprise site key">
+                                </div>
+                                <div class="kgr-admin-field" x-show="googleRecaptchaType === 'enterprise'">
+                                    <label>Google Cloud API Key</label>
+                                    <div class="kgr-admin-help" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+                                        <span x-text="credentialStatus('google_recaptcha_enterprise_api_key', <?php echo $has_google_enterprise_api_key ? 'true' : 'false'; ?>)"></span>
+                                        <button type="button" class="kgr-btn" @click="toggleCredentialEdit('google_recaptcha_enterprise_api_key')">
+                                            <span x-text="credentialEditing.google_recaptcha_enterprise_api_key ? 'Cancel' : 'Replace API key'"></span>
+                                        </button>
+                                    </div>
+                                    <input type="password" name="captcha[google_recaptcha_enterprise_api_key]" x-show="credentialEditing.google_recaptcha_enterprise_api_key" value="" autocomplete="new-password" placeholder="Enter a Google Cloud API key">
+                                </div>
+                            </div>
+                            <div class="kgr-admin-field">
+                                <label>Minimum Score (0.1 - 1.0)</label>
+                                <input type="number" step="0.1" name="captcha[google_recaptcha_min_score]"
+                                    value="<?php echo esc_attr($settings['captcha']['google_recaptcha_min_score'] ?? '0.5'); ?>">
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -585,6 +671,7 @@ $has_google_secret = !empty($settings['captcha']['google_recaptcha_secret_key'])
         Alpine.data('kgrSettings', () => ({
             tab: 'general',
             testingMode: '<?php echo esc_js($settings['general']['testing_mode'] ?? 'off'); ?>',
+            qaHintsEnabled: <?php echo ((string)($settings['general']['qa_hints_enabled'] ?? '0') === '1') ? 'true' : 'false'; ?>,
             routingMode: '<?php echo esc_js($routing_mode); ?>',
             saving: false,
             toast: '',
@@ -602,6 +689,8 @@ $has_google_secret = !empty($settings['captcha']['google_recaptcha_secret_key'])
             testingWhmcs: false,
             testingCloudflare: false,
             testingGoogle: false,
+            captchaProvider: '<?php echo esc_js($settings['captcha']['captcha_provider'] ?? 'cloudflare'); ?>',
+            googleRecaptchaType: '<?php echo esc_js($settings['captcha']['google_recaptcha_type'] ?? 'classic'); ?>',
             mappingHealth: {},
             mappingRows: [],
             missingRequests: [],
@@ -622,7 +711,9 @@ $has_google_secret = !empty($settings['captcha']['google_recaptcha_secret_key'])
                 cloudflare_turnstile_site_key: false,
                 cloudflare_turnstile_secret_key: false,
                 google_recaptcha_site_key: false,
-                google_recaptcha_secret_key: false
+                google_recaptcha_secret_key: false,
+                google_recaptcha_enterprise_site_key: false,
+                google_recaptcha_enterprise_api_key: false
             },
             mappingForm: {
                 whmcs_client_id: '',
@@ -699,7 +790,9 @@ $has_google_secret = !empty($settings['captcha']['google_recaptcha_secret_key'])
                     cloudflare_turnstile_site_key: 'captcha[cloudflare_turnstile_site_key]',
                     cloudflare_turnstile_secret_key: 'captcha[cloudflare_turnstile_secret_key]',
                     google_recaptcha_site_key: 'captcha[google_recaptcha_site_key]',
-                    google_recaptcha_secret_key: 'captcha[google_recaptcha_secret_key]'
+                    google_recaptcha_secret_key: 'captcha[google_recaptcha_secret_key]',
+                    google_recaptcha_enterprise_site_key: 'captcha[google_recaptcha_enterprise_site_key]',
+                    google_recaptcha_enterprise_api_key: 'captcha[google_recaptcha_enterprise_api_key]'
                 };
                 return map[field] || '';
             },
@@ -710,9 +803,9 @@ $has_google_secret = !empty($settings['captcha']['google_recaptcha_secret_key'])
                     .then(res => res.json())
                     .then(res => {
                         this.toast = (res.data && res.data.message) ? res.data.message : (res.success ? 'Jira credentials are valid.' : 'Jira test failed.');
-                        setTimeout(() => this.toast = '', 7000);
+                        setTimeout(() => this.toast = '', 14000);
                     })
-                    .catch(() => { this.toast = 'Jira test failed.'; setTimeout(() => this.toast = '', 7000); })
+                    .catch(() => { this.toast = 'Jira test failed.'; setTimeout(() => this.toast = '', 14000); })
                     .finally(() => this.testingJira = false);
             },
             testWhmcsCredentials() {
@@ -722,9 +815,9 @@ $has_google_secret = !empty($settings['captcha']['google_recaptcha_secret_key'])
                     .then(res => res.json())
                     .then(res => {
                         this.toast = (res.data && res.data.message) ? res.data.message : (res.success ? 'WHMCS credentials are valid.' : 'WHMCS test failed.');
-                        setTimeout(() => this.toast = '', 7000);
+                        setTimeout(() => this.toast = '', 14000);
                     })
-                    .catch(() => { this.toast = 'WHMCS test failed.'; setTimeout(() => this.toast = '', 7000); })
+                    .catch(() => { this.toast = 'WHMCS test failed.'; setTimeout(() => this.toast = '', 14000); })
                     .finally(() => this.testingWhmcs = false);
             },
             testCloudflareCredentials() {
@@ -734,9 +827,9 @@ $has_google_secret = !empty($settings['captcha']['google_recaptcha_secret_key'])
                     .then(res => res.json())
                     .then(res => {
                         this.toast = (res.data && res.data.message) ? res.data.message : (res.success ? 'Cloudflare keys are valid.' : 'Cloudflare key test failed.');
-                        setTimeout(() => this.toast = '', 7000);
+                        setTimeout(() => this.toast = '', 14000);
                     })
-                    .catch(() => { this.toast = 'Cloudflare key test failed.'; setTimeout(() => this.toast = '', 7000); })
+                    .catch(() => { this.toast = 'Cloudflare key test failed.'; setTimeout(() => this.toast = '', 14000); })
                     .finally(() => this.testingCloudflare = false);
             },
             testGoogleCredentials() {
@@ -746,14 +839,18 @@ $has_google_secret = !empty($settings['captcha']['google_recaptcha_secret_key'])
                     .then(res => res.json())
                     .then(res => {
                         this.toast = (res.data && res.data.message) ? res.data.message : (res.success ? 'Google keys are valid.' : 'Google key test failed.');
-                        setTimeout(() => this.toast = '', 7000);
+                        setTimeout(() => this.toast = '', 14000);
                     })
-                    .catch(() => { this.toast = 'Google key test failed.'; setTimeout(() => this.toast = '', 7000); })
+                    .catch(() => { this.toast = 'Google key test failed.'; setTimeout(() => this.toast = '', 14000); })
                     .finally(() => this.testingGoogle = false);
             },
             saveSettings(e) {
                 this.saving = true;
                 const formData = new FormData(e.target);
+                if (this.testingMode !== 'on') {
+                    this.qaHintsEnabled = false;
+                }
+                formData.set('general[qa_hints_enabled]', (this.testingMode === 'on' && this.qaHintsEnabled) ? '1' : '0');
                 
                 this.generalErrors.admin_emails = '';
                 this.generalErrors.test_emails = '';
@@ -820,11 +917,11 @@ $has_google_secret = !empty($settings['captcha']['google_recaptcha_secret_key'])
                         } else {
                             this.toast = (res.data && res.data.message) ? res.data.message : 'Failed to save settings.';
                         }
-                        setTimeout(() => this.toast = '', 7000);
+                        setTimeout(() => this.toast = '', 14000);
                     })
                     .catch(() => {
                         this.toast = 'Failed to save settings.';
-                        setTimeout(() => this.toast = '', 7000);
+                        setTimeout(() => this.toast = '', 14000);
                     })
                     .finally(() => this.saving = false);
             },
@@ -849,17 +946,17 @@ $has_google_secret = !empty($settings['captcha']['google_recaptcha_secret_key'])
                             this.mappingHealth = res.data || {};
                             if (showToast) {
                                 this.toast = 'Mapping health refreshed.';
-                                setTimeout(() => this.toast = '', 7000);
+                                setTimeout(() => this.toast = '', 14000);
                             }
                         } else if (showToast) {
                             this.toast = 'Failed to refresh mapping health.';
-                            setTimeout(() => this.toast = '', 7000);
+                            setTimeout(() => this.toast = '', 14000);
                         }
                     })
                     .catch(() => {
                         if (showToast) {
                             this.toast = 'Failed to refresh mapping health.';
-                            setTimeout(() => this.toast = '', 7000);
+                            setTimeout(() => this.toast = '', 14000);
                         }
                     })
                     .finally(() => this.healthRefreshing = false);
@@ -893,7 +990,7 @@ $has_google_secret = !empty($settings['captcha']['google_recaptcha_secret_key'])
                 this.resetMappingForm();
                 this.mappingDrawerOpen = true;
                 this.toast = 'Manual mapping form is ready.';
-                setTimeout(() => this.toast = '', 7000);
+                setTimeout(() => this.toast = '', 14000);
                 setTimeout(() => {
                     const input = document.querySelector('.kgr-side-panel input[type="number"]');
                     if (input) {
@@ -1013,11 +1110,11 @@ $has_google_secret = !empty($settings['captcha']['google_recaptcha_secret_key'])
                         } else {
                             this.toast = (res.data && res.data.message) ? res.data.message : 'Failed to save mapping.';
                         }
-                        setTimeout(() => this.toast = '', 7000);
+                        setTimeout(() => this.toast = '', 14000);
                     })
                     .catch(() => {
                         this.toast = 'Failed to save mapping.';
-                        setTimeout(() => this.toast = '', 7000);
+                        setTimeout(() => this.toast = '', 14000);
                     })
                     .finally(() => this.mappingSaving = false);
             },
@@ -1046,11 +1143,11 @@ $has_google_secret = !empty($settings['captcha']['google_recaptcha_secret_key'])
                         } else {
                             this.toast = (res.data && res.data.message) ? res.data.message : 'Failed to deactivate mapping.';
                         }
-                        setTimeout(() => this.toast = '', 7000);
+                        setTimeout(() => this.toast = '', 14000);
                     })
                     .catch(() => {
                         this.toast = 'Failed to deactivate mapping.';
-                        setTimeout(() => this.toast = '', 7000);
+                        setTimeout(() => this.toast = '', 14000);
                     });
             },
             fetchJiraSpacesNow() {
@@ -1072,14 +1169,70 @@ $has_google_secret = !empty($settings['captcha']['google_recaptcha_secret_key'])
                         } else {
                             this.toast = (res.data && res.data.message) ? res.data.message : 'Failed to fetch Jira spaces.';
                         }
-                        setTimeout(() => this.toast = '', 7000);
+                        setTimeout(() => this.toast = '', 14000);
                     })
                     .catch(() => {
                         this.toast = 'Failed to fetch Jira spaces.';
-                        setTimeout(() => this.toast = '', 7000);
+                        setTimeout(() => this.toast = '', 14000);
                     })
                     .finally(() => this.spacesFetching = false);
             }
         }));
     });
 </script>
+<style>
+    .kgr-info-tip {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        border: 1px solid #8a8fa3;
+        color: #4d546d;
+        font-size: 11px;
+        line-height: 1;
+        cursor: help;
+        user-select: none;
+        background: #f7f8fb;
+    }
+    .kgr-info-tip__box {
+        position: absolute;
+        left: 24px;
+        top: 50%;
+        transform: translateY(-50%);
+        min-width: 280px;
+        max-width: 360px;
+        background: #111827;
+        color: #fff;
+        font-size: 12px;
+        line-height: 1.45;
+        padding: 10px 12px;
+        border-radius: 8px;
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+        z-index: 20;
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.22);
+    }
+    .kgr-info-tip:hover .kgr-info-tip__box,
+    .kgr-info-tip:focus .kgr-info-tip__box,
+    .kgr-info-tip:focus-within .kgr-info-tip__box {
+        opacity: 1;
+        visibility: visible;
+    }
+    .kgr-checkbox-row .kgr-checkbox-input {
+        width: auto !important;
+        min-width: 19px;
+        height: 19px;
+        margin: 0;
+        padding: 0;
+        border-radius: 5px;
+        background: transparent;
+        display: inline-block;
+        vertical-align: middle;
+        border-color: lightgray;
+    }
+</style>
+

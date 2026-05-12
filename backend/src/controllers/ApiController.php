@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\controllers;
 
 use App\helpers\Http;
+use App\helpers\Logger;
 use App\helpers\Security;
 use App\config\Config;
 use App\services\CaptchaService;
@@ -89,6 +90,7 @@ final class ApiController
         try {
             if ($action === 'preview') {
                 if (Config::getBool('CAPTCHA_ENFORCE_PREVIEW', false)) {
+                    $this->logCaptchaDiagnostics($payload, 'preview');
                     $captcha = $this->captchaService->verify($payload, $ip, 'preview');
                     if (empty($captcha['success'])) {
                         Http::json(['success' => false, 'message' => $captcha['message'] ?? 'Captcha validation failed.'], 422);
@@ -106,6 +108,7 @@ final class ApiController
                     Http::json(['success' => false, 'message' => $honeypot['message'] ?? 'Spam validation failed.'], 422);
                     return;
                 }
+                $this->logCaptchaDiagnostics($payload, 'submit');
                 $captcha = $this->captchaService->verify($payload, $ip, 'submit');
                 if (empty($captcha['success'])) {
                     Http::json(['success' => false, 'message' => $captcha['message'] ?? 'Captcha validation failed.'], 422);
@@ -122,6 +125,19 @@ final class ApiController
         } catch (Throwable $exception) {
             Http::json(['success' => false, 'message' => 'Request failed.', 'error' => $exception->getMessage()], 500);
         }
+    }
+
+    private function logCaptchaDiagnostics(array $payload, string $context): void
+    {
+        Logger::info('Captcha submit diagnostics', [
+            'trace_id' => $payload['_trace_id'] ?? null,
+            'context' => $context,
+            'provider' => Config::get('CAPTCHA_PROVIDER', 'none'),
+            'google_type' => Config::get('GOOGLE_RECAPTCHA_TYPE', 'classic'),
+            'has_captcha_token' => !empty($payload['captcha_token'] ?? null),
+            'has_g_recaptcha_response' => !empty($payload['g-recaptcha-response'] ?? null),
+            'token_length' => strlen((string) ($payload['captcha_token'] ?? $payload['g-recaptcha-response'] ?? '')),
+        ]);
     }
 
     private function normalizeWebsiteIssueFiles(array $allFiles): array
