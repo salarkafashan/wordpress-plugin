@@ -33,7 +33,7 @@ final class PluginUpdater
             KGR_PLUGIN_UPDATE_URI,
             KGR_PLUGIN_FILE,
             KGR_PLUGIN_SLUG,
-            1 // Check every 6 hours (default is longer), so users see updates sooner.
+            12 // Check every 12 hours (default is longer), so users see updates sooner.
         );
 
         // Keep stable branch explicit for fallback checks.

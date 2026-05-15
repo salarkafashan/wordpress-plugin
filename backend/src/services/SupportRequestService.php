@@ -17,12 +17,11 @@ use Throwable;
 final class SupportRequestService
 {
     private array $websiteIssueTypes = ['Content change', 'Image replacement', 'Form problem', 'Performance issue', 'Other'];
-    private int $minDescriptionChars = 20;
+    private int $minDescriptionChars = 1;
     private array $urgencyLevels = [
-        'Minor issue',
-        'Some users affected',
-        'Important functionality broken',
-        'Website unusable',
+        'Low',
+        'Medium',
+        'High',
     ];
 
     private SupportRequestModel $requestModel;
@@ -220,7 +219,7 @@ final class SupportRequestService
                 $issues = [
                     [
                         'issue_type' => $sanitized['service_type'] . ' request',
-                        'urgency_level' => 'Minor issue',
+                        'urgency_level' => 'Medium',
                         'page_url' => $sanitized['website_url'] ?: 'https://service.local/request',
                         'description' => $sanitized['message'],
                         'current_content' => null,
@@ -543,20 +542,20 @@ final class SupportRequestService
                 }
 
                 if ($issueType === 'Content change') {
-                    if (strlen($changeDetails) < $this->minDescriptionChars) {
-                        $errors["issues.$index.change_details"] = 'Change details are required (minimum 20 characters).';
+                    if (trim($changeDetails) === '') {
+                        $errors["issues.$index.change_details"] = 'Change details are required.';
                     }
                     $normalizedDescription = $changeDetails;
                     $currentContent = $changeDetails !== '' ? $changeDetails : null;
                 } elseif ($issueType === 'Image replacement') {
-                    if (strlen($imageDetails) < $this->minDescriptionChars) {
-                        $errors["issues.$index.image_details"] = 'Image details are required (minimum 20 characters).';
+                    if (trim($imageDetails) === '') {
+                        $errors["issues.$index.image_details"] = 'Image details are required.';
                     }
                     $normalizedDescription = $imageDetails;
                     $newContent = $imageDetails !== '' ? $imageDetails : null;
                 } else {
-                    if (strlen($description) < $this->minDescriptionChars) {
-                        $errors["issues.$index.description"] = 'Description is required (minimum 20 characters).';
+                    if (trim($description) === '') {
+                        $errors["issues.$index.description"] = 'Description is required.';
                     }
                     $normalizedDescription = $description;
                 }
@@ -572,13 +571,13 @@ final class SupportRequestService
                 ];
             }
         } else {
-            if (strlen($message) < $this->minDescriptionChars) {
-                $errors['message'] = 'Message is required (minimum 20 characters).';
+            if (trim($message) === '') {
+                $errors['message'] = 'Message is required.';
             }
             $title = $title !== '' ? $title : substr($message, 0, 120);
             $sanitizedIssues[] = [
                 'issue_type' => $serviceType . ' request',
-                'urgency_level' => 'Minor issue',
+                'urgency_level' => 'Medium',
                 'page_url' => $websiteUrl !== '' ? $websiteUrl : 'https://service.local/request',
                 'description' => $message,
                 'current_content' => null,
@@ -636,19 +635,8 @@ final class SupportRequestService
 
         foreach ($issues as $index => $issue) {
             $issueType = (string) ($issue['issue_type'] ?? '');
-            if ($issueType !== 'Other') {
-                continue;
-            }
-
-            $files = $filesByIssue[(int) $index] ?? [];
-            $validFiles = array_values(array_filter(
-                $files,
-                static fn(array $file): bool => ((int) ($file['error'] ?? UPLOAD_ERR_NO_FILE)) === UPLOAD_ERR_OK
-            ));
-
-            if (count($validFiles) === 0) {
-                $errors["issues.$index.screenshots"] = 'Please upload at least one screenshot for "Other" issues.';
-            }
+            // Screenshot uploads are optional for "Other" issues.
+            continue;
         }
 
         return $errors;

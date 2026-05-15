@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Kanguru Support
  * Description: Integrated multi-step support request system with WHMCS backend.
- * Version: 1.1.3
+ * Version: 1.1.4
  * Update URI: https://github.com/salarkafashan/wordpress-plugin
  * Author: Kanguru Team
  * Text Domain: knaguru-support
@@ -16,7 +16,7 @@ if (!defined('ABSPATH')) {
 define('KGR_PLUGIN_FILE', __FILE__);
 define('KGR_PLUGIN_PATH', plugin_dir_path(__FILE__));
 define('KGR_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('KGR_PLUGIN_VERSION', '1.1.3');
+define('KGR_PLUGIN_VERSION', '1.1.4');
 define('KGR_PLUGIN_UPDATE_URI', 'https://github.com/salarkafashan/wordpress-plugin');
 define('KGR_PLUGIN_SLUG', 'kanguru-support');
 define('KGR_PLUGIN_MIGRATION_OPTION', 'kgr_support_plugin_migration_version');
@@ -79,6 +79,44 @@ add_filter('no_texturize_shortcodes', function ($shortcodes) {
 	$shortcodes[] = 'support_request_form';
 	return $shortcodes;
 });
+
+// 5.2 Plugin list links customization:
+// - Add Settings link next to Activate/Deactivate actions
+// - Hide "Check for updates" row meta link for this plugin
+add_filter('plugin_action_links_' . plugin_basename(KGR_PLUGIN_FILE), function ($links) {
+	$settingsLink = '<a href="' . esc_url(admin_url('admin.php?page=kgr-support-settings')) . '">Settings</a>';
+
+	$ordered = [];
+	$inserted = false;
+	foreach ($links as $key => $html) {
+		$ordered[$key] = $html;
+		if ($key === 'deactivate') {
+			$ordered['settings'] = $settingsLink;
+			$inserted = true;
+		}
+	}
+
+	if (!$inserted) {
+		$ordered = array_merge(['settings' => $settingsLink], $ordered);
+	}
+
+	return $ordered;
+});
+
+add_filter('plugin_row_meta', function ($meta, $pluginFile) {
+	if ($pluginFile !== plugin_basename(KGR_PLUGIN_FILE)) {
+		return $meta;
+	}
+
+	$filtered = [];
+	foreach ($meta as $item) {
+		if (stripos((string) $item, 'Check for updates') !== false) {
+			continue;
+		}
+		$filtered[] = $item;
+	}
+	return $filtered;
+}, 10, 2);
 
 // 6. Register API Endpoints for WordPress
 add_action('init', function () {

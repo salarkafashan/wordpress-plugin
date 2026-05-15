@@ -19,7 +19,6 @@
 			this.stepCounters = root.querySelectorAll( '[data-kgr-step-counter]' );
 			this.stepLabels = root.querySelectorAll( '[data-kgr-step-label]' );
 			this.layout = root.querySelector( '.kgr-layout' );
-			this.previewContainer = root.querySelector( '[data-kgr-preview-content]' );
 			this.reviewContainer = root.querySelector( '[data-kgr-review]' );
 			this.issueTemplate = root.querySelector( '#kgr-issue-template' ) || document.getElementById( 'kgr-issue-template' );
 			this.issuesContainer = root.querySelector( '[data-kgr-issues]' );
@@ -99,7 +98,7 @@
 				this.setHelperText();
 				this.applyQaHintsVisibility();
 				this.initQaHintComponents();
-				this.initCharCounters();
+				// this.initCharCounters();
 			};
 
 			if ( document.readyState === 'complete' || document.readyState === 'interactive' ) {
@@ -179,7 +178,7 @@
 				this.state.title = input.value.trim();
 			}
 			if ( name === 'message' ) {
-				this.state.message = input.value.trim();
+				this.state.message = input.value;
 			}
 			if ( input.id === 'KGR_non_website_files' ) {
 				this.state.attachments = Array.from( input.files || [] );
@@ -505,8 +504,8 @@
 				valid = false;
 			}
 
-			if ( ! this.state.message || this.state.message.length < 20 ) {
-				this.setFieldError( 'message', this.config.i18n.descriptionMinMessage || 'Please enter at least 20 characters.' );
+			if ( ! this.state.message || ! this.state.message.trim() ) {
+				this.setFieldError( 'message', 'Message is required.' );
 				valid = false;
 			}
 			if ( this.state.attachments.length ) {
@@ -560,20 +559,20 @@
 					valid = false;
 				}
 				if ( issue.issue_type !== ISSUE_TYPES.CONTENT && issue.issue_type !== ISSUE_TYPES.IMAGE ) {
-					if ( ! issue.description || issue.description.length < 20 ) {
-						this.setIssueError( index, 'description', this.config.i18n.descriptionMinMessage || 'Please enter at least 20 characters.' );
+					if ( ! issue.description || ! issue.description.trim() ) {
+						this.setIssueError( index, 'description', 'Description is required.' );
 						valid = false;
 					}
 				}
 				if ( issue.issue_type === ISSUE_TYPES.CONTENT ) {
-					if ( ! issue.change_details || issue.change_details.length < 20 ) {
-						this.setIssueError( index, 'change_details', 'Please describe the change needed (minimum 20 characters).' );
+					if ( ! issue.change_details || ! issue.change_details.trim() ) {
+						this.setIssueError( index, 'change_details', 'Please describe the change needed.' );
 						valid = false;
 					}
 				}
 				if ( issue.issue_type === ISSUE_TYPES.IMAGE ) {
-					if ( ! issue.image_details || issue.image_details.length < 20 ) {
-						this.setIssueError( index, 'image_details', 'Please describe which image should be replaced (minimum 20 characters).' );
+					if ( ! issue.image_details || ! issue.image_details.trim() ) {
+						this.setIssueError( index, 'image_details', 'Please describe which image should be replaced.' );
 						valid = false;
 					}
 					if ( (issue.screenshots || []).length === 0 ) {
@@ -581,11 +580,6 @@
 						valid = false;
 					}
 				}
-				if ( issue.issue_type === ISSUE_TYPES.OTHER && (issue.screenshots || []).length === 0 ) {
-					this.setIssueError( index, 'screenshots', 'Please upload at least one screenshot for "Other" issues.' );
-					valid = false;
-				}
-
 				const shots = issue.screenshots || [];
 				if ( shots.length > maxScreenshots ) {
 					this.setIssueError( index, 'screenshots', `Maximum ${ maxScreenshots } screenshots are allowed.` );
@@ -790,9 +784,6 @@
 				if ( errorNode ) {
 					errorNode.id = `error_issue_${ index }_${ field }`;
 				}
-				if ( input.tagName === 'TEXTAREA' ) {
-					this.setupCharCounter( input );
-				}
 			} );
 
 			this.toggleIssueConditional( card, issue );
@@ -809,8 +800,6 @@
 
 			const isContent = issue.issue_type === ISSUE_TYPES.CONTENT;
 			const isImage = issue.issue_type === ISSUE_TYPES.IMAGE;
-			const isOther = issue.issue_type === ISSUE_TYPES.OTHER;
-
 			if ( content ) content.classList.toggle( 'kgr-hidden', ! isContent );
 			if ( image ) image.classList.toggle( 'kgr-hidden', ! isImage );
 			if ( description ) description.classList.toggle( 'kgr-hidden', isContent || isImage );
@@ -818,11 +807,7 @@
 				screenshots.classList.toggle( 'kgr-hidden', isImage );
 				const label = screenshots.querySelector( 'label' );
 				if ( label ) {
-					if ( isOther ) {
-						label.textContent = 'Upload screenshots (required)';
-					} else {
-						label.textContent = isContent ? 'Upload files (optional)' : 'Upload screenshots (optional)';
-					}
+					label.textContent = isContent ? 'Upload files (optional)' : 'Upload screenshots (optional)';
 				}
 				const fileInput = screenshots.querySelector( 'input[type="file"]' );
 				if ( fileInput ) {
@@ -830,13 +815,7 @@
 				}
 				const hint = screenshots.querySelector( '.kgr-hint:not([data-file-reselect-note])' );
 				if ( hint ) {
-					if ( isContent ) {
-						hint.textContent = 'Accepted: Images, PDF, Word, ZIP.';
-					} else if ( isOther ) {
-						hint.textContent = 'At least one image screenshot is required.';
-					} else {
-						hint.textContent = '';
-					}
+					hint.textContent = isContent ? 'Accepted: Images, PDF, Word, ZIP.' : '';
 				}
 			}
 		}
@@ -870,14 +849,7 @@
 					formData.append( `issues[${ i }][page_url]`, String( issue.page_url || '' ).trim() );
 					formData.append( `issues[${ i }][issue_type]`, String( issue.issue_type || '' ) );
 					
-					// IMPORTANT: Map UI urgency labels to Backend urgency levels
-					let urgencyLevel = 'Minor issue';
-					if ( issue.urgency === 'Medium' ) {
-						urgencyLevel = 'Some users affected';
-					} else if ( issue.urgency === 'High' ) {
-						urgencyLevel = 'Website unusable';
-					}
-					formData.append( `issues[${ i }][urgency_level]`, urgencyLevel );
+					formData.append( `issues[${ i }][urgency_level]`, String( issue.urgency || '' ) );
 					
 					formData.append( `issues[${ i }][description]`, String( issue.description || '' ).trim() );
 					formData.append( `issues[${ i }][change_details]`, String( issue.change_details || '' ).trim() );
@@ -1301,10 +1273,6 @@
 			// Preview is now handled reactively by Alpine.js in the template
 		}
 
-		previewSection( title, rows, sectionIndex ) {
-			const rowsHtml = rows.map( ( row ) => `<div class="kgr-preview__line"><span>${ this.escape( row[0] ) }</span><span>${ this.escape( row[1] ) }</span></div>` ).join( '' );
-			return `<section class="kgr-preview__section"><h4>${ this.escape( title ) }</h4>${ rowsHtml }</section>`;
-		}
 
 		renderReview() {
 			const blocks = [];
@@ -1328,7 +1296,7 @@
 						Screenshots: ${( issue.screenshots || [] ).length}
 					</div>
 				` ).join( '' );
-				blocks.push( `<section class="kgr-review__section"><h4>Issues summary</h4>${ issues || '<p>No issues added.</p>' }</section>` );
+				blocks.push( `<section class="kgr-review__section"><h4>Requests summary</h4>${ issues || '<p>No Request added.</p>' }</section>` );
 			} else {
 				blocks.push( this.reviewSection( 'Request details', [
 					[ 'Title', this.state.request_title || '-' ],
@@ -1405,33 +1373,6 @@
 				.replaceAll( '\'', '&#39;' );
 		}
 
-		initCharCounters() {
-			this.form.querySelectorAll( 'textarea' ).forEach( ( ta ) => this.setupCharCounter( ta ) );
-		}
-
-		setupCharCounter( textarea ) {
-			if ( textarea.dataset.hasCounter ) return;
-			textarea.dataset.hasCounter = 'true';
-
-			const counter = document.createElement( 'div' );
-			counter.className = 'kgr-char-count';
-			counter.style.fontSize = '0.75rem';
-			counter.style.textAlign = 'right';
-			counter.style.marginTop = '-0.2rem';
-			counter.style.marginBottom = '0.2rem';
-			
-			textarea.parentNode.insertBefore( counter, textarea.nextSibling );
-			
-			this.updateCharCount( textarea, counter );
-			
-			textarea.addEventListener( 'input', () => this.updateCharCount( textarea, counter ) );
-		}
-
-		updateCharCount( textarea, counter ) {
-			const len = textarea.value.length;
-			counter.textContent = `${ len } / 20 min`;
-			counter.style.color = len < 20 ? 'red' : '#00001a';
-		}
 
 		renderFilePreviews( input, filesArray, isNonWebsite, index ) {
 			let container = input.parentNode.querySelector( '.kgr-file-previews' );
