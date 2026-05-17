@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Kanguru Support
  * Description: Integrated multi-step support request system with WHMCS backend.
- * Version: 1.1.4
+ * Version: 1.1.5
  * Update URI: https://github.com/salarkafashan/wordpress-plugin
  * Author: Kanguru Team
  * Text Domain: knaguru-support
@@ -16,7 +16,7 @@ if (!defined('ABSPATH')) {
 define('KGR_PLUGIN_FILE', __FILE__);
 define('KGR_PLUGIN_PATH', plugin_dir_path(__FILE__));
 define('KGR_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('KGR_PLUGIN_VERSION', '1.1.4');
+define('KGR_PLUGIN_VERSION', '1.1.5');
 define('KGR_PLUGIN_UPDATE_URI', 'https://github.com/salarkafashan/wordpress-plugin');
 define('KGR_PLUGIN_SLUG', 'kanguru-support');
 define('KGR_PLUGIN_MIGRATION_OPTION', 'kgr_support_plugin_migration_version');
