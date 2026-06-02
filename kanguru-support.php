@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Kanguru Support
  * Description: Integrated multi-step support request system with WHMCS backend.
- * Version: 1.1.7
+ * Version: 1.1.8
  * Update URI: https://github.com/salarkafashan/wordpress-plugin
  * Author: Kanguru Team
  * Text Domain: kanguru-support
@@ -16,7 +16,7 @@ if (!defined('ABSPATH')) {
 define('KGR_PLUGIN_FILE', __FILE__);
 define('KGR_PLUGIN_PATH', plugin_dir_path(__FILE__));
 define('KGR_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('KGR_PLUGIN_VERSION', '1.1.7');
+define('KGR_PLUGIN_VERSION', '1.1.8');
 define('KGR_PLUGIN_UPDATE_URI', 'https://github.com/salarkafashan/wordpress-plugin');
 define('KGR_PLUGIN_SLUG', 'kanguru-support');
 define('KGR_PLUGIN_MIGRATION_OPTION', 'kgr_support_plugin_migration_version');
@@ -84,7 +84,7 @@ add_filter('no_texturize_shortcodes', function ($shortcodes) {
 // - Add Settings link next to Activate/Deactivate actions
 // - Hide "Check for updates" row meta link for this plugin
 add_filter('plugin_action_links_' . plugin_basename(KGR_PLUGIN_FILE), function ($links) {
-	$settingsLink = '<a href="' . esc_url(admin_url('admin.php?page=kgr-settings')) . '">Settings</a>';
+	$settingsLink = '<a href="' . esc_url(admin_url('admin.php?page=kgr-setting')) . '">Settings</a>';
 
 	$ordered = [];
 	$inserted = false;
