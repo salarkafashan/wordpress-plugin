@@ -84,7 +84,7 @@ add_filter('no_texturize_shortcodes', function ($shortcodes) {
 // - Add Settings link next to Activate/Deactivate actions
 // - Hide "Check for updates" row meta link for this plugin
 add_filter('plugin_action_links_' . plugin_basename(KGR_PLUGIN_FILE), function ($links) {
-	$settingsLink = '<a href="' . esc_url(admin_url('admin.php?page=kgr-support-settings')) . '">Settings</a>';
+	$settingsLink = '<a href="' . esc_url(admin_url('admin.php?page=kgr-settings')) . '">Settings</a>';
 
 	$ordered = [];
 	$inserted = false;

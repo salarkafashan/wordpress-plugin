@@ -73,13 +73,20 @@ Upload a ZIP asset to each GitHub release with this naming pattern:
 1. Bump version in `kanguru-support.php`.
 2. Commit and push.
 3. Create Git tag/release (example: `v1.1.2`).
-4. Upload release asset ZIP (example: `kanguru-support-1.1.2.zip`).
+4. Build the ZIP with `.\scripts\build-release.ps1 -Version X.Y.Z` and upload that release asset ZIP (example: `kanguru-support-1.1.2.zip`).
 5. In WordPress Admin:
    - **Dashboard -> Updates -> Check Again**
    - **Plugins** page should show the update
    - Click **Update now**
 
 ### ZIP packaging rules
+
+Important:
+
+- The ZIP must unpack to a single top-level `kanguru-support/` folder.
+- The main plugin file must remain `kanguru-support/kanguru-support.php`.
+- Do not change the folder name or main file name between releases.
+- Use the release build script on Windows. Some zip tools create invalid entry paths for Linux hosts, which causes files to unzip into the plugin root with names like `kanguru-support/assets/css/admin.css`.
 
 Include:
 

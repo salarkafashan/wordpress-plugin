@@ -15,6 +15,7 @@ $stageRoot = Join-Path $releaseRoot $PluginSlug
 $zipName = "$PluginSlug-$Version.zip"
 $outputPath = Join-Path $repoRoot $OutputDir
 $zipPath = Join-Path $outputPath $zipName
+$stagedFiles = @()
 
 function Should-ExcludeFile([string]$relativePath, [string]$fileName) {
     $normalized = $relativePath.Replace('\', '/')
@@ -67,13 +68,41 @@ Get-ChildItem -Path $repoRoot -Recurse -File | ForEach-Object {
         New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
     }
     Copy-Item -LiteralPath $full -Destination $target -Force
+    $stagedFiles += [pscustomobject]@{
+        SourcePath = $target
+        EntryName = ($relative.Replace('\', '/'))
+    }
 }
 
 if (Test-Path $zipPath) {
     Remove-Item -Force $zipPath
 }
 
-Compress-Archive -Path $stageRoot -DestinationPath $zipPath -CompressionLevel Optimal
+Add-Type -AssemblyName System.IO.Compression
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+$zipFile = [System.IO.File]::Open($zipPath, [System.IO.FileMode]::CreateNew)
+try {
+    $archive = New-Object System.IO.Compression.ZipArchive($zipFile, [System.IO.Compression.ZipArchiveMode]::Create, $false)
+    try {
+        foreach ($file in $stagedFiles) {
+            $entryPath = "$PluginSlug/$($file.EntryName)"
+            [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+                $archive,
+                $file.SourcePath,
+                $entryPath,
+                [System.IO.Compression.CompressionLevel]::Optimal
+            ) | Out-Null
+        }
+    }
+    finally {
+        $archive.Dispose()
+    }
+}
+finally {
+    $zipFile.Dispose()
+}
+
 Remove-Item -Recurse -Force $releaseRoot
 
 Write-Host "Release ZIP created: $zipPath"

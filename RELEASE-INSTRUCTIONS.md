@@ -59,9 +59,20 @@ Example:
 .\scripts\build-release.ps1 -Version 1.1.1
 ```
 
+Do not create the release ZIP manually from Windows Explorer or other ad-hoc zip tools. Use the script so the archive entries are written with standard ZIP paths. Some Linux hosting unzip tools will otherwise extract files with names like `kanguru-support/assets/css/admin.css` instead of real folders.
+
 Output ZIP will be created in:
 
 - `dist/kanguru-support-X.Y.Z.zip`
+
+### Required ZIP structure
+
+The ZIP must unpack to a single top-level folder named `kanguru-support/`.
+Inside that folder, the main plugin file must still be:
+
+- `kanguru-support/kanguru-support.php`
+
+Do not rename the folder or the main plugin file between releases. WordPress stores the active plugin path using that basename, and a changed path can produce `Plugin file does not exist` after update.
 
 ## 7) Validate ZIP contents
 
