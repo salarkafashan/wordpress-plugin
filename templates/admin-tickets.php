@@ -94,7 +94,7 @@ $stats = \SupportRequestFrontend\Includes\AdminController::get_dashboard_stats()
                             <span x-text="t.issue_type"></span>
                         </td>
                         <td>
-                            <span class="kgr-status-pill" x-text="t.status || 'pending'"></span>
+                            <span class="kgr-status-pill" x-text="formatStatus(t.status || 'pending')"></span>
                         </td>
                         <td>
                             <span class="kgr-badge" :class="'kgr-badge--' + priorityClass(t.priority)"
@@ -185,7 +185,7 @@ $stats = \SupportRequestFrontend\Includes\AdminController::get_dashboard_stats()
                             <div class="kgr-data-row">
                                 <div class="kgr-data-label">Support Status</div>
                                 <div class="kgr-data-value"><span class="kgr-status-pill"
-                                        x-text="detailData.request.status"></span></div>
+                                        x-text="formatStatus(detailData.request.status)"></span></div>
                             </div>
                             <div class="kgr-data-row">
                                 <div class="kgr-data-label">Jira Key</div>
@@ -344,6 +344,19 @@ $stats = \SupportRequestFrontend\Includes\AdminController::get_dashboard_stats()
                 if (value === 'high' || value.includes('critical') || value.includes('urgent')) return 'high';
                 if (value === 'low' || value.includes('minor') || value.includes('small')) return 'low';
                 return 'medium';
+            },
+
+            formatStatus(raw) {
+                const value = String(raw || '').trim();
+                if (!value) {
+                    return 'Pending';
+                }
+
+                return value
+                    .replace(/[_-]+/g, ' ')
+                    .replace(/\s+/g, ' ')
+                    .toLowerCase()
+                    .replace(/\b\w/g, (match) => match.toUpperCase());
             }
         }));
     });

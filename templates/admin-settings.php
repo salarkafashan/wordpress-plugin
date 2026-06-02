@@ -388,13 +388,13 @@ if ($jira_days_left === null && $jira_token_expires_on !== '') {
                                     <input type="password" name="captcha[google_recaptcha_secret_key]" x-show="credentialEditing.google_recaptcha_secret_key" value="" autocomplete="new-password" placeholder="Enter a new Google secret key">
                                 </div>
                                 <div class="kgr-admin-field" x-show="googleRecaptchaType === 'enterprise'">
-                                    <label>Enterprise Project ID</label>
+                                    <label>Project ID</label>
                                     <input type="text" name="captcha[google_recaptcha_enterprise_project_id]"
                                         value="<?php echo esc_attr($settings['captcha']['google_recaptcha_enterprise_project_id'] ?? ''); ?>"
                                         placeholder="kanguru-1725557056933">
                                 </div>
                                 <div class="kgr-admin-field" x-show="googleRecaptchaType === 'enterprise'">
-                                    <label>Enterprise Site Key</label>
+                                    <label><a href="https://console.cloud.google.com/security/recaptcha">Site Key (ID)</a></label>
                                     <div class="kgr-admin-help" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
                                         <span x-text="credentialStatus('google_recaptcha_enterprise_site_key', <?php echo $has_google_enterprise_site_key ? 'true' : 'false'; ?>)"></span>
                                         <button type="button" class="kgr-btn" @click="toggleCredentialEdit('google_recaptcha_enterprise_site_key')">
@@ -404,7 +404,7 @@ if ($jira_days_left === null && $jira_token_expires_on !== '') {
                                     <input type="text" name="captcha[google_recaptcha_enterprise_site_key]" x-show="credentialEditing.google_recaptcha_enterprise_site_key" value="" placeholder="Enter an Enterprise site key">
                                 </div>
                                 <div class="kgr-admin-field" x-show="googleRecaptchaType === 'enterprise'">
-                                    <label>Google Cloud API Key</label>
+                                    <label><a href="https://console.cloud.google.com/apis/credentials">API Key</a></label>
                                     <div class="kgr-admin-help" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
                                         <span x-text="credentialStatus('google_recaptcha_enterprise_api_key', <?php echo $has_google_enterprise_api_key ? 'true' : 'false'; ?>)"></span>
                                         <button type="button" class="kgr-btn" @click="toggleCredentialEdit('google_recaptcha_enterprise_api_key')">

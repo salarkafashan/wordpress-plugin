@@ -82,25 +82,25 @@ final class CronController
         if (!isset($schedules['kgr_every_minute'])) {
             $schedules['kgr_every_minute'] = [
                 'interval' => 60,
-                'display' => __('Every Minute (Kanguru Support)', 'knaguru-support'),
+                'display' => __('Every Minute (Kanguru Support)', 'kanguru-support'),
             ];
         }
         if (!isset($schedules['kgr_every_5_minutes'])) {
             $schedules['kgr_every_5_minutes'] = [
                 'interval' => 300,
-                'display' => __('Every 5 Minutes (Kanguru Support)', 'knaguru-support'),
+                'display' => __('Every 5 Minutes (Kanguru Support)', 'kanguru-support'),
             ];
         }
         if (!isset($schedules['kgr_every_15_minutes'])) {
             $schedules['kgr_every_15_minutes'] = [
                 'interval' => 900,
-                'display' => __('Every 15 Minutes (Kanguru Support)', 'knaguru-support'),
+                'display' => __('Every 15 Minutes (Kanguru Support)', 'kanguru-support'),
             ];
         }
         if (!isset($schedules['kgr_every_30_minutes'])) {
             $schedules['kgr_every_30_minutes'] = [
                 'interval' => 1800,
-                'display' => __('Every 30 Minutes (Kanguru Support)', 'knaguru-support'),
+                'display' => __('Every 30 Minutes (Kanguru Support)', 'kanguru-support'),
             ];
         }
         return $schedules;

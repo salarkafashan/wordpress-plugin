@@ -79,8 +79,8 @@ final class AdminController
     public static function add_pages(): void
     {
         add_menu_page(
-            __('Kanguru Support', 'knaguru-support'),
-            __('Kanguru Support', 'knaguru-support'),
+            __('Kanguru Support', 'kanguru-support'),
+            __('Kanguru Support', 'kanguru-support'),
             'manage_options',
             self::$parent_slug,
             [__CLASS__, 'render_tickets_page'],
@@ -90,8 +90,8 @@ final class AdminController
 
         add_submenu_page(
             self::$parent_slug,
-            __('Ticket Management', 'knaguru-support'),
-            __('Tickets', 'knaguru-support'),
+            __('Ticket Management', 'kanguru-support'),
+            __('Tickets', 'kanguru-support'),
             'manage_options',
             self::$parent_slug,
             [__CLASS__, 'render_tickets_page']
@@ -99,8 +99,8 @@ final class AdminController
 
         add_submenu_page(
             self::$parent_slug,
-            __('Settings', 'knaguru-support'),
-            __('Settings', 'knaguru-support'),
+            __('Settings', 'kanguru-support'),
+            __('Settings', 'kanguru-support'),
             'manage_options',
             'kgr-setting',
             [__CLASS__, 'render_settings_page']
@@ -108,8 +108,8 @@ final class AdminController
 
         add_submenu_page(
             self::$parent_slug,
-            __('Usage Guide', 'knaguru-support'),
-            __('Usage Guide', 'knaguru-support'),
+            __('Usage Guide', 'kanguru-support'),
+            __('Usage Guide', 'kanguru-support'),
             'manage_options',
             'kgr-guide',
             [__CLASS__, 'render_guide_page']
