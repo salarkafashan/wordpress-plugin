@@ -11,6 +11,7 @@ use App\models\SupportIssueModel;
 use App\models\SupportRequestModel;
 use App\config\Config;
 use RuntimeException;
+use SupportRequestFrontend\Includes\AdminController;
 use Throwable;
 
 final class QueueService
@@ -737,7 +738,7 @@ final class QueueService
 
     private function wrapEmailHtml(string $title, string $contentHtml): string
     {
-        $logoUrl = (string) Config::get('EMAIL_LOGO_URL', 'https://via.placeholder.com/160x48?text=Kanguru+Logo');
+        $logoUrl = AdminController::get_email_logo_url();
         $safeTitle = htmlspecialchars($title, ENT_QUOTES, 'UTF-8');
         $dateTime = date('Y-m-d H:i:s');
 
@@ -785,7 +786,7 @@ final class QueueService
 
     private function wrapEmailHtmlBilingual(string $frTitle, string $frContentHtml, string $enTitle, string $enContentHtml): string
     {
-        $logoUrl = (string) Config::get('EMAIL_LOGO_URL', 'https://via.placeholder.com/160x48?text=Kanguru+Logo');
+        $logoUrl = AdminController::get_email_logo_url();
         $dateTime = date('Y-m-d H:i:s');
 
         return '<!doctype html>

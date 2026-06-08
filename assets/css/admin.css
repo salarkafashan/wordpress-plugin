@@ -166,6 +166,37 @@
     transform: translateY(0);
 }
 
+.kgr-media-picker {
+    display: grid;
+    gap: 12px;
+}
+
+.kgr-media-picker__preview {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 96px;
+    padding: 12px;
+    border: 1px solid var(--kgr-admin-border);
+    border-radius: var(--kgr-admin-radius);
+    background: #fcfcfc;
+}
+
+.kgr-media-picker__preview img {
+    display: block;
+    max-width: 100%;
+    max-height: 72px;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+}
+
+.kgr-media-picker__actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
 /* Dashboard Stats */
 .kgr-admin-stats {
     display: grid;

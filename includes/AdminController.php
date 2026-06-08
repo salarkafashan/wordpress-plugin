@@ -125,6 +125,7 @@ final class AdminController
             return;
         }
 
+        wp_enqueue_media();
         wp_enqueue_style('kgr-admin-css', KGR_PLUGIN_URL . 'assets/css/admin.css', [], KGR_PLUGIN_VERSION);
         wp_enqueue_script('alpinejs', 'https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js', [], '3.12.0', false);
         add_filter('script_loader_tag', function ($tag, $handle) {
@@ -205,6 +206,10 @@ final class AdminController
 
                 if (self::is_sensitive_key($key)) {
                     $value = self::encrypt($rawValue);
+                }
+                if ((string) $tab === 'general' && (string) $key === 'email_logo_url') {
+                    $sanitized[$tab][$key] = esc_url_raw((string) $value);
+                    continue;
                 }
                 $sanitized[$tab][$key] = sanitize_text_field($value);
             }
@@ -400,7 +405,7 @@ final class AdminController
 
     private static function wrap_admin_email_html(string $title, string $contentHtml): string
     {
-        $logoUrl = (string) Config::get('EMAIL_LOGO_URL', 'https://via.placeholder.com/160x48?text=Kanguru+Logo');
+        $logoUrl = self::get_email_logo_url();
         $safeTitle = esc_html($title);
         $dateTime = date('Y-m-d H:i:s');
 
@@ -444,6 +449,27 @@ final class AdminController
   </table>
 </body>
 </html>';
+    }
+
+    public static function get_email_logo_url(): string
+    {
+        $settings = get_option('kgr_setting', []);
+        $storedUrl = '';
+
+        if (is_array($settings) && isset($settings['general']) && is_array($settings['general'])) {
+            $storedUrl = esc_url_raw((string) ($settings['general']['email_logo_url'] ?? ''));
+        }
+
+        if ($storedUrl !== '') {
+            return $storedUrl;
+        }
+
+        $envUrl = esc_url_raw((string) Config::get('EMAIL_LOGO_URL', ''));
+        if ($envUrl !== '') {
+            return $envUrl;
+        }
+
+        return 'https://via.placeholder.com/160x48?text=Kanguru+Logo';
     }
 
     public static function ajax_get_tickets(): void

@@ -36,6 +36,12 @@ final class CronController
         add_action(self::$jira_catalog_sync_hook, [__CLASS__, 'run_jira_catalog_sync']);
 
         // Keep schedule definitions aligned after deployments without requiring plugin reactivation.
+        // Run this on init so translated schedule labels are not resolved too early on WP 6.7+.
+        add_action('init', [__CLASS__, 'ensure_registered_schedules'], 20);
+    }
+
+    public static function ensure_registered_schedules(): void
+    {
         self::ensure_event_schedule(self::$queue_hook, self::get_queue_recurrence());
         self::ensure_event_schedule(self::$mapping_audit_hook, 'daily');
         self::ensure_event_schedule(self::$jira_catalog_sync_hook, 'daily');

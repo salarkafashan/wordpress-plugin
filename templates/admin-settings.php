@@ -88,6 +88,23 @@ if ($jira_days_left === null && $jira_token_expires_on !== '') {
                         </select>
                         <p class="kgr-admin-help">Used by queue processing cron. On low-traffic websites, 15-30 minutes is usually best.</p>
                     </div>
+
+                    <div class="kgr-admin-field">
+                        <label>Email Header Logo</label>
+                        <input type="hidden" name="general[email_logo_url]" x-model="emailLogoUrl">
+                        <div class="kgr-media-picker">
+                            <template x-if="emailLogoUrl">
+                                <div class="kgr-media-picker__preview">
+                                    <img :src="emailLogoUrl" alt="Email header logo preview">
+                                </div>
+                            </template>
+                            <div class="kgr-media-picker__actions">
+                                <button type="button" class="kgr-btn" @click="selectEmailLogo()">Choose from Media</button>
+                                <button type="button" class="kgr-btn" x-show="emailLogoUrl" @click="removeEmailLogo()">Remove</button>
+                            </div>
+                        </div>
+                        <p class="kgr-admin-help">Used in the header of all plugin emails. If empty, the plugin falls back to the configured environment logo.</p>
+                    </div>
                 </div>
                 <div>
                     <h3> sandbox Environment</h3>
@@ -672,6 +689,7 @@ if ($jira_days_left === null && $jira_token_expires_on !== '') {
             tab: 'general',
             testingMode: '<?php echo esc_js($settings['general']['testing_mode'] ?? 'off'); ?>',
             qaHintsEnabled: <?php echo ((string)($settings['general']['qa_hints_enabled'] ?? '0') === '1') ? 'true' : 'false'; ?>,
+            emailLogoUrl: '<?php echo esc_js((string) ($settings['general']['email_logo_url'] ?? '')); ?>',
             routingMode: '<?php echo esc_js($routing_mode); ?>',
             saving: false,
             toast: '',
@@ -729,6 +747,7 @@ if ($jira_days_left === null && $jira_token_expires_on !== '') {
                 is_active: 1
             },
             adminNonce: '<?php echo wp_create_nonce('kgr_admin_nonce'); ?>',
+            emailLogoFrame: null,
             init() {
                 this.$watch('tab', (value) => {
                     if (value === 'mappings') {
@@ -740,6 +759,32 @@ if ($jira_days_left === null && $jira_token_expires_on !== '') {
                         this.maybeLoadMappings();
                     }
                 });
+            },
+            selectEmailLogo() {
+                if (typeof wp === 'undefined' || !wp.media) {
+                    this.toast = 'WordPress media library is not available.';
+                    setTimeout(() => this.toast = '', 14000);
+                    return;
+                }
+
+                if (!this.emailLogoFrame) {
+                    this.emailLogoFrame = wp.media({
+                        title: 'Select Email Logo',
+                        button: { text: 'Use this logo' },
+                        library: { type: 'image' },
+                        multiple: false
+                    });
+
+                    this.emailLogoFrame.on('select', () => {
+                        const attachment = this.emailLogoFrame.state().get('selection').first().toJSON();
+                        this.emailLogoUrl = attachment.url || '';
+                    });
+                }
+
+                this.emailLogoFrame.open();
+            },
+            removeEmailLogo() {
+                this.emailLogoUrl = '';
             },
             supportProjectKeyPreview() {
                 const field = document.querySelector('[name="jira[jira_support_project_key]"]');

@@ -238,7 +238,7 @@ final class SupportRequestService
                 $this->queueService->enqueue('optimize_attachment', $requestId, ['attachment_id' => (int) $attachment['id']], 0, 5);
             }
 
-            $this->queueService->enqueue('send_confirmation_email', $requestId, ['confirm_url' => $confirmationUrl], 0);
+            $this->queueService->dispatchNow('send_confirmation_email', $requestId, ['confirm_url' => $confirmationUrl]);
             $this->queueService->enqueue('send_confirmation_reminder', $requestId, ['confirm_url' => $confirmationUrl], 6 * 3600);
             $this->triggerQueueProcessingAsync();
 
