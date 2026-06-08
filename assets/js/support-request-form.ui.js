@@ -172,10 +172,10 @@
 				this.state.last_name = input.value.trim();
 			}
 			if ( name === 'organization_name' ) {
-				this.state.business_name = input.value.trim();
+				this.state.business_name = input.value;
 			}
 			if ( name === 'title' ) {
-				this.state.title = input.value.trim();
+				this.state.title = input.value;
 			}
 			if ( name === 'message' ) {
 				this.state.message = input.value;
@@ -193,7 +193,7 @@
 					this.state.issues[ index ][ field ] = Array.from( input.files || [] );
 					this.renderFileList( input.closest( '.kgr-upload' ), this.state.issues[ index ].screenshots, 'No screenshots selected yet.', input );
 				} else {
-					this.state.issues[ index ][ field ] = input.value.trim();
+					this.state.issues[ index ][ field ] = input.value;
 					if ( field === 'issue_type' ) {
 						this.toggleIssueConditional( card, this.state.issues[ index ] );
 					}

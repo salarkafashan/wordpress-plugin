@@ -132,8 +132,8 @@ final class UploadService
     private function isMimeAllowedForExtension(string $mimeType, string $extension): bool
     {
         $allowed = [
-            'jpg' => ['image/jpeg'],
-            'jpeg' => ['image/jpeg'],
+            'jpg' => ['image/jpeg', 'image/pjpeg', 'application/octet-stream'],
+            'jpeg' => ['image/jpeg', 'image/pjpeg', 'application/octet-stream'],
             'png' => ['image/png'],
             'webp' => ['image/webp'],
             'avif' => ['image/avif'],

@@ -274,7 +274,7 @@ endif;
 						<div class="kgr-branch kgr-hidden" data-branch="details-website">
 							<div class="kgr-issues" data-kgr-issues></div>
 							<div class="kgr-actions kgr-actions--left">
-								<button type="button" class="kgr-link-btn" data-action="add-issue">
+								<button type="button" class="kgr-outline-btn" data-action="add-issue">
 									+ <?php esc_html_e('Add another issue', 'kanguru-support'); ?>
 								</button>
 							</div>

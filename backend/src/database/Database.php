@@ -54,6 +54,7 @@ final class Database
                         'clients_cache' => 'client_cache',
                         'client_domains' => 'client_domain',
                         'client_jira_maps' => 'client_jira_map',
+                        'rate_limits' => 'rate_limit',
                         ];
 
                         foreach ($map as $old => $new) {
@@ -105,6 +106,7 @@ final class Database
                     'clients_cache' => 'client_cache',
                     'client_domains' => 'client_domain',
                     'client_jira_maps' => 'client_jira_map',
+                    'rate_limits' => 'rate_limit',
                 ];
 
                 foreach ($map as $old => $new) {

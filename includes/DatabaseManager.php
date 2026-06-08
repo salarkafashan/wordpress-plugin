@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
 
 final class DatabaseManager
 {
-    private const SCHEMA_VERSION = '1.6.0';
+    private const SCHEMA_VERSION = '1.6.1';
 
     private static $tables = [
         'request' => "
@@ -150,6 +150,16 @@ final class DatabaseManager
                 KEY jira_project_key (jira_project_key),
                 KEY website_url (website_url),
                 KEY is_active (is_active)
+            ) %s;",
+        'rate_limit' => "
+            CREATE TABLE %s (
+                id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+                limiter_key varchar(191) NOT NULL,
+                created_at_unix bigint(20) NOT NULL,
+                PRIMARY KEY  (id),
+                KEY limiter_key (limiter_key),
+                KEY created_at_unix (created_at_unix),
+                KEY limiter_key_time (limiter_key, created_at_unix)
             ) %s;"
     ];
 
