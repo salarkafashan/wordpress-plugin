@@ -102,9 +102,21 @@ $stats = \SupportRequestFrontend\Includes\AdminController::get_dashboard_stats()
                         </td>
                         <td x-text="formatDate(t.created_at)"></td>
                         <td>
-                            <button @click.stop="viewDetails(t.id)" class="kgr-btn"
+                             <button @click.stop="viewDetails(t.id)" class="kgr-btn"
+                                title="View details"
                                 style="background:transparent; color: var(--kgr-admin-primary); padding: 5px;">
                                 <i class="dashicons dashicons-visibility"></i>
+                            </button>
+                            <button
+                                x-show="t.status === 'pending_confirmation'"
+                                @click.stop="resendConfirmation(t)"
+                                class="kgr-btn"
+                                title="Resend confirmation email"
+                                :disabled="resendLoadingId === t.id"
+                                style="background:transparent; color: var(--kgr-admin-primary); padding: 5px;"
+                            >
+                                <i x-show="resendLoadingId !== t.id" class="dashicons dashicons-email-alt"></i>
+                                <span x-show="resendLoadingId === t.id" class="kgr-btn__spinner kgr-btn__spinner--dark" aria-hidden="true"></span>
                             </button>
                         </td>
                     </tr>
@@ -161,7 +173,22 @@ $stats = \SupportRequestFrontend\Includes\AdminController::get_dashboard_stats()
                 <template x-if="detailData.request">
                     <div>
                         <div class="kgr-panel-section">
-                            <h4>Client Information</h4>
+                            <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom: 0.75rem;">
+                                <h4 style="margin:0;">Client Information</h4>
+                                <button
+                                    x-show="detailData.request.status === 'pending_confirmation'"
+                                    @click="resendConfirmation(detailData.request)"
+                                    class="kgr-btn kgr-btn--primary"
+                                    :disabled="resendLoadingId === detailData.request.id"
+                                    type="button"
+                                >
+                                    <span x-show="resendLoadingId !== detailData.request.id">Resend confirmation email</span>
+                                    <span x-show="resendLoadingId === detailData.request.id" style="display:inline-flex; align-items:center; gap:8px;">
+                                        <span class="kgr-btn__spinner" aria-hidden="true"></span>
+                                        <span>Sending...</span>
+                                    </span>
+                                </button>
+                            </div>
                             <div class="kgr-data-row">
                                 <div class="kgr-data-label">Name</div>
                                 <div class="kgr-data-value" x-text="detailData.request.client_name"></div>
@@ -243,6 +270,11 @@ $stats = \SupportRequestFrontend\Includes\AdminController::get_dashboard_stats()
             </div>
         </div>
     </div>
+    <template x-if="toast">
+        <div class="kgr-toast" x-transition>
+            <span x-text="toast"></span>
+        </div>
+    </template>
 </div>
 
 <script>
@@ -258,6 +290,8 @@ $stats = \SupportRequestFrontend\Includes\AdminController::get_dashboard_stats()
             showDetails: false,
             detailsLoading: false,
             detailData: {},
+            toast: '',
+            resendLoadingId: 0,
 
             init() {
                 this.$watch('page', () => this.fetchTickets());
@@ -309,6 +343,66 @@ $stats = \SupportRequestFrontend\Includes\AdminController::get_dashboard_stats()
                     })
                     .finally(() => {
                         this.detailsLoading = false;
+                    });
+            },
+
+            showToast(message) {
+                this.toast = message;
+                window.setTimeout(() => {
+                    this.toast = '';
+                }, 14000);
+            },
+
+            resendConfirmation(ticket) {
+                const requestId = Number(ticket?.id || 0);
+                if (!requestId) {
+                    this.showToast('Invalid request ID.');
+                    return;
+                }
+
+                if (this.resendLoadingId === requestId) {
+                    return;
+                }
+
+                const loadingStartedAt = Date.now();
+                const minSpinnerMs = 1500;
+                this.resendLoadingId = requestId;
+
+                const body = new URLSearchParams({
+                    action: 'kgr_resend_confirmation_email',
+                    request_id: String(requestId),
+                    nonce: '<?php echo wp_create_nonce('kgr_admin_nonce'); ?>'
+                });
+
+                fetch(ajaxurl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
+                    },
+                    body: body.toString()
+                })
+                    .then(res => res.json())
+                    .then(res => {
+                        if (!res.success) {
+                            throw new Error(res.data?.message || 'Could not resend confirmation email.');
+                        }
+
+                        const sentTo = res.data?.confirmation_sent_to ? ` to ${res.data.confirmation_sent_to}` : '';
+                        this.showToast(`Confirmation email resent${sentTo}.`);
+                        this.fetchTickets();
+                        if (this.showDetails && this.detailData?.request?.id === requestId) {
+                            this.viewDetails(requestId);
+                        }
+                    })
+                    .catch((error) => {
+                        this.showToast(error.message || 'Could not resend confirmation email.');
+                    })
+                    .finally(() => {
+                        const elapsed = Date.now() - loadingStartedAt;
+                        const remaining = Math.max(0, minSpinnerMs - elapsed);
+                        window.setTimeout(() => {
+                            this.resendLoadingId = 0;
+                        }, remaining);
                     });
             },
 

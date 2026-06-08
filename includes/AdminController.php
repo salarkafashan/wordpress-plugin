@@ -14,6 +14,7 @@ use App\helpers\Logger;
 use App\config\Config;
 use App\services\ClientJiraMappingService;
 use App\services\JiraService;
+use App\services\SupportRequestService;
 use Throwable;
 
 if (!defined('ABSPATH')) {
@@ -32,6 +33,7 @@ final class AdminController
         add_action('wp_ajax_kgr_get_tickets', [__CLASS__, 'ajax_get_tickets']);
         add_action('wp_ajax_kgr_get_ticket_details', [__CLASS__, 'ajax_get_ticket_details']);
         add_action('wp_ajax_kgr_download_attachment', [__CLASS__, 'ajax_download_attachment']);
+        add_action('wp_ajax_kgr_resend_confirmation_email', [__CLASS__, 'ajax_resend_confirmation_email']);
         add_action('wp_ajax_kgr_get_mapping_health', [__CLASS__, 'ajax_get_mapping_health']);
         add_action('wp_ajax_kgr_get_client_mappings', [__CLASS__, 'ajax_get_client_mappings']);
         add_action('wp_ajax_kgr_save_client_mapping', [__CLASS__, 'ajax_save_client_mapping']);
@@ -517,11 +519,11 @@ final class AdminController
             foreach ($attachments as &$att) {
                 $attachmentId = (int) ($att['id'] ?? 0);
                 $att['file_url'] = $attachmentId > 0
-                    ? wp_nonce_url(
+                    ? html_entity_decode(wp_nonce_url(
                         admin_url('admin-ajax.php?action=kgr_download_attachment&attachment_id=' . $attachmentId),
                         'kgr_download_attachment_' . $attachmentId,
                         'nonce'
-                    )
+                    ), ENT_QUOTES, 'UTF-8')
                     : '';
             }
             $issue['attachments'] = $attachments;
@@ -608,6 +610,26 @@ final class AdminController
         header('X-Robots-Tag: noindex, nofollow', true);
         readfile($absolutePath);
         exit;
+    }
+
+    public static function ajax_resend_confirmation_email(): void
+    {
+        check_ajax_referer('kgr_admin_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(['message' => 'Unauthorized'], 403);
+        }
+
+        $requestId = isset($_POST['request_id']) ? (int) $_POST['request_id'] : 0;
+        if ($requestId <= 0) {
+            wp_send_json_error(['message' => 'Invalid request ID.'], 400);
+        }
+
+        $result = (new SupportRequestService())->resendConfirmation($requestId);
+        if (!empty($result['success'])) {
+            wp_send_json_success($result);
+        }
+
+        wp_send_json_error($result, 422);
     }
 
     public static function ajax_get_mapping_health(): void

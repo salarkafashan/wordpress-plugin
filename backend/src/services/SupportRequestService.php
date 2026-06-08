@@ -320,6 +320,41 @@ final class SupportRequestService
         }
     }
 
+    public function resendConfirmation(int $requestId): array
+    {
+        $request = $this->requestModel->findById($requestId);
+        if (!$request) {
+            return ['success' => false, 'message' => 'Support request not found.'];
+        }
+
+        if ((string) $request['status'] !== 'pending_confirmation') {
+            return ['success' => false, 'message' => 'Only pending confirmation requests can be resent.'];
+        }
+
+        $token = bin2hex(random_bytes(32));
+        $tokenHash = hash('sha256', $token);
+        $expiresAt = date('Y-m-d H:i:s', time() + (24 * 3600));
+        $confirmationUrl = $this->buildConfirmationUrlForRequest($request, $token);
+
+        try {
+            $this->requestModel->refreshConfirmation($requestId, $tokenHash, $expiresAt);
+            $this->queueService->dispatchNow('send_confirmation_email', $requestId, ['confirm_url' => $confirmationUrl]);
+
+            return [
+                'success' => true,
+                'message' => 'Confirmation email sent successfully.',
+                'confirmation_sent_to' => (string) ($request['confirmation_sent_to'] ?? ''),
+            ];
+        } catch (Throwable $exception) {
+            Logger::error('Support confirmation resend failed', [
+                'request_id' => $requestId,
+                'error' => $exception->getMessage(),
+            ]);
+
+            return ['success' => false, 'message' => 'Could not resend confirmation email: ' . $exception->getMessage()];
+        }
+    }
+
     private function triggerQueueProcessingAsync(): void
     {
         if (!function_exists('wp_remote_post') || !function_exists('home_url')) {
@@ -337,6 +372,28 @@ final class SupportRequestService
             'blocking' => false,
             'sslverify' => apply_filters('https_local_ssl_verify', false),
         ]);
+    }
+
+    private function buildConfirmationUrlForRequest(array $request, string $token): string
+    {
+        $confirmationUrl = add_query_arg(
+            [
+                'kgr_api' => 'confirm',
+                'token' => $token,
+            ],
+            (string) home_url('/')
+        );
+
+        $metadata = json_decode((string) ($request['metadata_json'] ?? '{}'), true);
+        $metadata = is_array($metadata) ? $metadata : [];
+        $returnPageUrl = trim((string) ($metadata['return_page_url'] ?? ''));
+
+        if ($returnPageUrl !== '' && filter_var($returnPageUrl, FILTER_VALIDATE_URL) !== false) {
+            $glue = strpos($returnPageUrl, '?') !== false ? '&' : '?';
+            $confirmationUrl = $returnPageUrl . $glue . 'kgr_confirm_token=' . urlencode($token);
+        }
+
+        return $confirmationUrl;
     }
 
     private function processCriticalQueueNow(): void

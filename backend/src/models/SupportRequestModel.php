@@ -49,6 +49,13 @@ final class SupportRequestModel extends BaseModel
         return $stmt->fetch() ?: null;
     }
 
+    public function findById(int $id): ?array
+    {
+        $stmt = $this->db->prepare('SELECT * FROM support_requests WHERE id = :id LIMIT 1');
+        $stmt->execute(['id' => $id]);
+        return $stmt->fetch() ?: null;
+    }
+
     public function updateStatus(int $id, string $status): void
     {
         $sql = 'UPDATE support_requests SET status = :status, updated_at = :updated_at';
@@ -69,6 +76,17 @@ final class SupportRequestModel extends BaseModel
             'issue_key' => $issueKey,
             'jira_status' => $jiraStatus,
             'status' => 'ticket_created',
+            'updated_at' => date('Y-m-d H:i:s'),
+            'id' => $id,
+        ]);
+    }
+
+    public function refreshConfirmation(int $id, string $tokenHash, string $expiresAt): void
+    {
+        $stmt = $this->db->prepare('UPDATE support_requests SET confirmation_token_hash = :token_hash, confirmation_expires_at = :expires_at, updated_at = :updated_at WHERE id = :id');
+        $stmt->execute([
+            'token_hash' => $tokenHash,
+            'expires_at' => $expiresAt,
             'updated_at' => date('Y-m-d H:i:s'),
             'id' => $id,
         ]);

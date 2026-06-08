@@ -41,24 +41,29 @@ final class QueueService
     public function enqueue(string $jobType, int $requestId, array $payload = [], int $delaySeconds = 0, int $maxAttempts = 5): int
     {
         if ($this->shouldDispatchEmailImmediately($jobType)) {
-            try {
-                $this->executeJob([
-                    'job_type' => $jobType,
-                    'request_id' => $requestId,
-                    'payload_json' => json_encode($payload, JSON_UNESCAPED_SLASHES),
-                ]);
-                return 0;
-            } catch (Throwable $exception) {
-                Logger::error('Immediate email dispatch failed', [
-                    'job_type' => $jobType,
-                    'request_id' => $requestId,
-                    'error' => $exception->getMessage(),
-                ]);
-                throw new RuntimeException('Immediate email dispatch failed: ' . $exception->getMessage(), 0, $exception);
-            }
+            $this->dispatchNow($jobType, $requestId, $payload);
+            return 0;
         }
 
         return $this->queueModel->enqueue($jobType, $requestId, $payload, $delaySeconds, $maxAttempts);
+    }
+
+    public function dispatchNow(string $jobType, int $requestId, array $payload = []): void
+    {
+        try {
+            $this->executeJob([
+                'job_type' => $jobType,
+                'request_id' => $requestId,
+                'payload_json' => json_encode($payload, JSON_UNESCAPED_SLASHES),
+            ]);
+        } catch (Throwable $exception) {
+            Logger::error('Immediate job dispatch failed', [
+                'job_type' => $jobType,
+                'request_id' => $requestId,
+                'error' => $exception->getMessage(),
+            ]);
+            throw new RuntimeException('Immediate job dispatch failed: ' . $exception->getMessage(), 0, $exception);
+        }
     }
 
     public function process(array $jobTypes = [], int $limit = 25, ?array &$stats = null): void
