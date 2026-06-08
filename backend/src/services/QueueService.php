@@ -611,7 +611,7 @@ final class QueueService
         $lastName = (string) ($nameParts[1] ?? '');
 
         $content = '<p style="margin:0 0 14px 0;">Hi ' . htmlspecialchars($ownerName, ENT_QUOTES, 'UTF-8') . ',</p>';
-        $content .= '<p style="margin:0 0 14px 0;">A support request was submitted for your website using an email address different from the account owner email.</p>';
+        $content .= '<p style="margin:0 0 14px 0;">A support request was submitted for your website using an email address different from the account owner email that we have on our records.</p>';
         $content .= '<p style="margin:0 0 14px 0;">Please review the details below and confirm only if this request is legitimate.</p>';
         $content .= '<h3 style="margin:20px 0 10px;font-size:16px;">Sender Information</h3>';
         $content .= '<p>' .
@@ -664,7 +664,7 @@ final class QueueService
         $lastName = (string) ($nameParts[1] ?? '');
 
         $content = '<p style="margin:0 0 14px 0;">Bonjour ' . htmlspecialchars($ownerName, ENT_QUOTES, 'UTF-8') . ',</p>';
-        $content .= '<p style="margin:0 0 14px 0;">Une demande de support a été soumise pour votre site web avec une adresse courriel différente de celle du propriétaire du compte.</p>';
+        $content .= '<p style="margin:0 0 14px 0;">Une demande de support a été soumise pour votre site web avec une adresse courriel différente de celle du propriétaire du compte que nous avons dans nos dossiers.</p>';
         $content .= '<p style="margin:0 0 14px 0;">Veuillez vérifier les détails ci-dessous et confirmer uniquement si cette demande est légitime.</p>';
         $content .= '<h3 style="margin:20px 0 10px;font-size:16px;">Informations sur l’expéditeur</h3>';
         $content .= '<p>' .

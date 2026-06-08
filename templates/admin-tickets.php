@@ -87,7 +87,7 @@ $stats = \SupportRequestFrontend\Includes\AdminController::get_dashboard_stats()
                             <div class="kgr-admin-help" x-text="t.client_company"></div>
                         </td>
                         <td>
-                            <div x-text="t.client_name"></div>
+                            <div x-text="submittedDisplayName(t)"></div>
                             <div class="kgr-admin-help" x-text="t.submitted_email"></div>
                         </td>
                         <td>
@@ -299,6 +299,27 @@ $stats = \SupportRequestFrontend\Includes\AdminController::get_dashboard_stats()
                 this.$watch('orderBy', () => this.fetchTickets());
                 this.$watch('order', () => this.fetchTickets());
                 this.fetchTickets();
+            },
+
+            submittedDisplayName(ticket) {
+                const metadata = this.parseMetadata(ticket?.metadata_json);
+                const firstName = (metadata.submittedFirstName || '').trim();
+                const lastName = (metadata.submittedLastName || '').trim();
+                const fullName = [firstName, lastName].filter(Boolean).join(' ').trim();
+                return fullName || ticket?.client_name || 'Unknown Sender';
+            },
+
+            parseMetadata(rawMetadata) {
+                if (!rawMetadata || typeof rawMetadata !== 'string') {
+                    return {};
+                }
+
+                try {
+                    const parsed = JSON.parse(rawMetadata);
+                    return parsed && typeof parsed === 'object' ? parsed : {};
+                } catch (error) {
+                    return {};
+                }
             },
 
             fetchTickets() {
