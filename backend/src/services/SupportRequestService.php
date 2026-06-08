@@ -52,7 +52,7 @@ final class SupportRequestService
 
         $domain = $this->resolveDomainForHash($sanitized);
         $hash = $this->duplicateHash($sanitized['email'], $domain, $sanitized['issues']);
-        $duplicate = $this->requestModel->findByDuplicateHash($hash, 6);
+        $duplicate = $this->isQaModeEnabled() ? null : $this->requestModel->findByDuplicateHash($hash, 6);
 
         return [
             'valid' => true,
@@ -83,7 +83,7 @@ final class SupportRequestService
 
         $domain = $this->resolveDomainForHash($sanitized);
         $duplicateHash = $this->duplicateHash($sanitized['email'], $domain, $sanitized['issues']);
-        $duplicate = $this->requestModel->findByDuplicateHash($duplicateHash, 6);
+        $duplicate = $this->isQaModeEnabled() ? null : $this->requestModel->findByDuplicateHash($duplicateHash, 6);
         if ($duplicate && empty($sanitized['allow_duplicate'])) {
             Logger::error('Support submission blocked by duplicate guard', [
                 'trace_id' => $traceId,
@@ -789,5 +789,12 @@ final class SupportRequestService
         }
 
         return Config::getBool('WHMCS_BYPASS_LOCAL', false);
+    }
+
+    private function isQaModeEnabled(): bool
+    {
+        $settings = get_option('kgr_setting', []);
+        $general = is_array($settings['general'] ?? null) ? $settings['general'] : [];
+        return (string) ($general['testing_mode'] ?? 'off') === 'on';
     }
 }
