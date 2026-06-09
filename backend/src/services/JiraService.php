@@ -73,8 +73,7 @@ final class JiraService
 
             // Add Client Name custom field if mapped
             if ($clientFieldId !== '') {
-                $clientName = !empty($request['client_name']) ? $request['client_name'] : ($request['submitted_email'] ?? 'Unknown');
-                $payload['fields'][$clientFieldId] = $clientName;
+                $payload['fields'][$clientFieldId] = $this->buildJiraClientNameValue($request, $metadata);
             }
 
             try {
@@ -310,10 +309,22 @@ final class JiraService
 
         $metadata = json_decode((string) ($request['metadata_json'] ?? '{}'), true);
         $metadata = is_array($metadata) ? $metadata : [];
+        $ownerEmail = trim((string) ($metadata['whmcsOwnerEmail'] ?? ($request['verified_email'] ?? '')));
+        $companyName = trim((string) ($request['client_company'] ?? ''));
+        $whmcsClientId = trim((string) ($request['client_whmcs_id'] ?? ''));
 
         $content[] = $this->createAdfParagraph([
             ['type' => 'text', 'text' => 'Website: ', 'marks' => [['type' => 'strong']]],
             ['type' => 'text', 'text' => $request['website_domain'] ?? 'Unknown'],
+            ['type' => 'hardBreak'],
+            ['type' => 'text', 'text' => 'Client: ', 'marks' => [['type' => 'strong']]],
+            ['type' => 'text', 'text' => $companyName !== '' ? $companyName : 'N/A'],
+            ['type' => 'hardBreak'],
+            ['type' => 'text', 'text' => 'Owner Email: ', 'marks' => [['type' => 'strong']]],
+            ['type' => 'text', 'text' => $ownerEmail !== '' ? $ownerEmail : 'N/A'],
+            ['type' => 'hardBreak'],
+            ['type' => 'text', 'text' => 'WHMCS ID: ', 'marks' => [['type' => 'strong']]],
+            ['type' => 'text', 'text' => $whmcsClientId !== '' ? $whmcsClientId : 'N/A'],
             ['type' => 'hardBreak'],
             ['type' => 'text', 'text' => 'Request ID: ', 'marks' => [['type' => 'strong']]],
             ['type' => 'text', 'text' => $request['public_id'] ?? ''],
@@ -325,7 +336,7 @@ final class JiraService
             ['type' => 'text', 'text' => $request['created_at'] ?? '']
         ]);
 
-        $content[] = $this->createAdfHeading(3, 'Issues:');
+        $content[] = $this->createAdfHeading(3, ' ');
 
         $baseUrl = rtrim((string) \App\config\Config::get('APP_BASE_URL', ''), '/');
 
@@ -419,6 +430,36 @@ final class JiraService
             'version' => 1,
             'content' => $content
         ];
+    }
+
+    private function buildJiraClientNameValue(array $request, array $metadata): string
+    {
+        $whmcsClientId = trim((string) ($request['client_whmcs_id'] ?? ''));
+        $companyName = trim((string) ($request['client_company'] ?? ''));
+
+        if ($whmcsClientId !== '' && $companyName !== '') {
+            return $whmcsClientId . ' - ' . $companyName;
+        }
+
+        if ($companyName !== '') {
+            return $companyName;
+        }
+
+        if ($whmcsClientId !== '') {
+            return $whmcsClientId;
+        }
+
+        $ownerName = trim((string) ($request['client_name'] ?? ''));
+        if ($ownerName !== '') {
+            return $ownerName;
+        }
+
+        $ownerEmail = trim((string) ($metadata['whmcsOwnerEmail'] ?? ($request['verified_email'] ?? '')));
+        if ($ownerEmail !== '') {
+            return $ownerEmail;
+        }
+
+        return (string) ($request['submitted_email'] ?? 'Unknown');
     }
 
     private function createAdfParagraph(array $contentNodes): array
