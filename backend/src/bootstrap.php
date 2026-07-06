@@ -17,9 +17,6 @@ spl_autoload_register(function ($class) {
     }
 });
 
-Config::load(BASE_PATH . '/.env');
-date_default_timezone_set(Config::get('APP_TIMEZONE', 'America/Toronto'));
-
 /*
  * Public endpoint scripts can run outside normal WP execution path.
  * Ensure WordPress core is loaded so $wpdb/get_option are available.

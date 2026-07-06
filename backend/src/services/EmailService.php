@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\services;
 
 use App\config\Config;
+use App\helpers\Logger;
 use RuntimeException;
 
 final class EmailService
@@ -43,6 +44,12 @@ final class EmailService
         $sent = wp_mail($to, $subject, $body, $headers);
 
         if (!$sent) {
+            Logger::error('Email send failed', [
+                'to' => is_array($to) ? implode(', ', $to) : (string) $to,
+                'subject' => $subject,
+                'is_html' => $isHtml,
+                'testing_mode' => $isTesting,
+            ]);
             throw new RuntimeException("Failed to send email to {$to} via wp_mail.");
         }
     }

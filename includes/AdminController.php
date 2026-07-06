@@ -44,6 +44,7 @@ final class AdminController
         add_action('wp_ajax_kgr_test_whmcs_credentials', [__CLASS__, 'ajax_test_whmcs_credentials']);
         add_action('wp_ajax_kgr_test_cloudflare_credentials', [__CLASS__, 'ajax_test_cloudflare_credentials']);
         add_action('wp_ajax_kgr_test_google_credentials', [__CLASS__, 'ajax_test_google_credentials']);
+        add_action('wp_ajax_kgr_clear_logs', [__CLASS__, 'ajax_clear_logs']);
         add_action('admin_head', [__CLASS__, 'inject_menu_icon_styles']);
         add_action('admin_notices', [__CLASS__, 'render_jira_token_notice']);
     }
@@ -116,6 +117,15 @@ final class AdminController
             'kgr-guide',
             [__CLASS__, 'render_guide_page']
         );
+
+        add_submenu_page(
+            self::$parent_slug,
+            __('Logs', 'kanguru-support'),
+            __('Logs', 'kanguru-support'),
+            'manage_options',
+            'kgr-logs',
+            [__CLASS__, 'render_logs_page']
+        );
     }
 
     public static function enqueue_assets($hook): void
@@ -154,6 +164,24 @@ final class AdminController
     public static function render_guide_page()
     {
         include KGR_PLUGIN_PATH . 'templates/admin-guide.php';
+    }
+
+    public static function render_logs_page(): void
+    {
+        if (!current_user_can('manage_options')) {
+            wp_die('Unauthorized');
+        }
+
+        if (isset($_GET['download']) && $_GET['download'] === '1') {
+            check_admin_referer('kgr_download_logs');
+            self::download_logs();
+            exit;
+        }
+
+        $template = KGR_PLUGIN_PATH . 'templates/admin-logs.php';
+        if (file_exists($template)) {
+            include $template;
+        }
     }
 
     public static function ajax_save_settings()
@@ -235,6 +263,21 @@ final class AdminController
             self::run_jira_token_health_check('settings_save');
         }
         wp_send_json_success(['message' => 'Settings saved successfully']);
+    }
+
+    public static function ajax_clear_logs(): void
+    {
+        check_ajax_referer('kgr_admin_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(['message' => 'Unauthorized'], 403);
+        }
+
+        Logger::clear();
+        Logger::warning('Plugin log file was cleared from admin panel', [
+            'user_id' => get_current_user_id(),
+        ]);
+
+        wp_send_json_success(['message' => 'Logs cleared successfully.']);
     }
 
     public static function run_jira_token_health_check($trigger = 'manual')
@@ -470,6 +513,121 @@ final class AdminController
         }
 
         return 'https://via.placeholder.com/160x48?text=Kanguru+Logo';
+    }
+
+    public static function get_log_entries(string $level = 'all', string $search = '', int $limit = 500): array
+    {
+        $path = Logger::getPath();
+        if (!is_file($path)) {
+            return [];
+        }
+
+        $lines = @file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        if (!is_array($lines) || $lines === []) {
+            return [];
+        }
+
+        $entries = [];
+        $searchNeedle = strtolower(trim($search));
+
+        foreach (array_reverse($lines) as $line) {
+            $entry = self::parse_log_line((string) $line);
+            if ($entry === null) {
+                continue;
+            }
+
+            if ($level !== 'all' && strtolower($entry['level']) !== strtolower($level)) {
+                continue;
+            }
+
+            if ($searchNeedle !== '') {
+                $haystack = strtolower($entry['message'] . ' ' . $entry['context_raw']);
+                if (strpos($haystack, $searchNeedle) === false) {
+                    continue;
+                }
+            }
+
+            $entries[] = $entry;
+            if (count($entries) >= $limit) {
+                break;
+            }
+        }
+
+        return $entries;
+    }
+
+    public static function get_log_summary(): array
+    {
+        $path = Logger::getPath();
+        $summary = [
+            'path' => $path,
+            'exists' => is_file($path),
+            'size' => is_file($path) ? (int) filesize($path) : 0,
+            'error' => 0,
+            'warning' => 0,
+            'info' => 0,
+        ];
+
+        if (!$summary['exists']) {
+            return $summary;
+        }
+
+        $lines = @file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        if (!is_array($lines)) {
+            return $summary;
+        }
+
+        foreach ($lines as $line) {
+            $entry = self::parse_log_line((string) $line);
+            if ($entry === null) {
+                continue;
+            }
+            $key = strtolower($entry['level']);
+            if (isset($summary[$key])) {
+                $summary[$key]++;
+            }
+        }
+
+        return $summary;
+    }
+
+    private static function parse_log_line(string $line): ?array
+    {
+        if (!preg_match('/^\[(.*?)\]\s+(INFO|WARNING|ERROR)\s+(.*?)(?:\s+(\{.*\}))?$/', $line, $matches)) {
+            return null;
+        }
+
+        $contextRaw = isset($matches[4]) ? trim((string) $matches[4]) : '';
+        $context = [];
+        if ($contextRaw !== '') {
+            $decoded = json_decode($contextRaw, true);
+            if (is_array($decoded)) {
+                $context = $decoded;
+            }
+        }
+
+        return [
+            'timestamp' => (string) $matches[1],
+            'level' => (string) $matches[2],
+            'message' => trim((string) $matches[3]),
+            'context' => $context,
+            'context_raw' => $contextRaw,
+            'raw' => $line,
+        ];
+    }
+
+    private static function download_logs(): void
+    {
+        $path = Logger::getPath();
+        if (!is_file($path)) {
+            wp_die('Log file not found.');
+        }
+
+        nocache_headers();
+        header('Content-Type: text/plain; charset=utf-8');
+        header('Content-Disposition: attachment; filename="kanguru-support.log"');
+        header('Content-Length: ' . (string) filesize($path));
+        readfile($path);
     }
 
     public static function ajax_get_tickets(): void

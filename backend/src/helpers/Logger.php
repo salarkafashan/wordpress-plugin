@@ -13,6 +13,11 @@ final class Logger
         }
     }
 
+    public static function warning($message, $context = [])
+    {
+        self::write('WARNING', $message, $context);
+    }
+
     public static function mask($value)
     {
         $val = trim((string) $value);
@@ -33,9 +38,24 @@ final class Logger
         self::write('ERROR', $message, $context);
     }
 
+    public static function getPath(): string
+    {
+        return BASE_PATH . '/' . ltrim((string) Config::get('LOG_PATH', 'logs/app.log'), '/');
+    }
+
+    public static function clear(): void
+    {
+        $path = self::getPath();
+        $directory = dirname($path);
+        if (!is_dir($directory)) {
+            mkdir($directory, 0775, true);
+        }
+        file_put_contents($path, '');
+    }
+
     private static function write($level, $message, $context = [])
     {
-        $path = BASE_PATH . '/' . ltrim((string) Config::get('LOG_PATH', 'logs/app.log'), '/');
+        $path = self::getPath();
         $directory = dirname($path);
         if (!is_dir($directory)) {
             mkdir($directory, 0775, true);

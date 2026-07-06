@@ -316,7 +316,9 @@ endif;
 
 					<section class="kgr-step" data-step-key="submit-state" aria-hidden="true">
 						<div class="kgr-submit-state" data-kgr-submit-state>
-							<div class="kgr-submit-state__icon" data-submit-state-icon aria-hidden="true">⏳</div>
+							<div class="kgr-submit-state__icon kgr-submit-state__icon--pending" data-submit-state-icon aria-hidden="true">
+								<span class="kgr-dot-loader" aria-hidden="true"><span></span><span></span><span></span></span>
+							</div>
 							<h3 data-submit-state-title>
 								<?php esc_html_e('Submitting your request...', 'kanguru-support'); ?>
 							</h3>

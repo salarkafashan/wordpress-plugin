@@ -421,17 +421,41 @@ final class QueueService
     private function adminEmails(): array
     {
         $settings = get_option('kgr_setting', []);
-        $emailsRaw = (string) ($settings['general']['admin_emails'] ?? '');
-        if (trim($emailsRaw) === '') {
-            $emailsRaw = (string) Config::get('ADMIN_EMAILS', Config::get('ADMIN_EMAIL', ''));
+        $general = is_array($settings['general'] ?? null) ? $settings['general'] : [];
+        $emails = $this->parseEmailList((string) ($general['admin_emails'] ?? ''));
+
+        if ($emails === []) {
+            $fallbackRaw = (string) Config::get('ADMIN_EMAILS', Config::get('ADMIN_EMAIL', ''));
+            $emails = $this->parseEmailList($fallbackRaw);
         }
-        $parts = array_filter(array_map('trim', explode(',', $emailsRaw)));
+
+        $isTesting = (string) ($general['testing_mode'] ?? 'off') === 'on';
+        if ($emails === [] && $isTesting) {
+            $emails = $this->parseEmailList((string) ($general['test_emails'] ?? ''));
+            if ($emails !== []) {
+                Logger::warning('Admin email recipients missing; falling back to sandbox test emails', [
+                    'count' => count($emails),
+                ]);
+            }
+        }
+
+        if ($emails === []) {
+            Logger::warning('Admin summary email skipped because no admin recipients are configured');
+        }
+
+        return $emails;
+    }
+
+    private function parseEmailList(string $raw): array
+    {
+        $parts = array_filter(array_map('trim', explode(',', $raw)));
         $valid = [];
         foreach ($parts as $email) {
             if (filter_var($email, FILTER_VALIDATE_EMAIL) !== false) {
                 $valid[] = strtolower($email);
             }
         }
+
         return array_values(array_unique($valid));
     }
 

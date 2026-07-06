@@ -1055,14 +1055,18 @@
 
 		setSubmitState( mode, message ) {
 			this.backToReviewBtn.classList.toggle( 'kgr-hidden', mode !== 'error' );
+			this.submitStateIcon.classList.remove( 'kgr-submit-state__icon--pending' );
+			this.submitStateIcon.classList.remove( 'kgr-submit-state__icon--success' );
 			if ( mode === 'pending' ) {
-				this.submitStateIcon.textContent = '...';
+				this.submitStateIcon.classList.add( 'kgr-submit-state__icon--pending' );
+				this.submitStateIcon.innerHTML = '<span class="kgr-dot-loader" aria-hidden="true"><span></span><span></span><span></span></span>';
 				this.submitStateTitle.textContent = 'Submitting your request...';
 				this.submitStateMessage.textContent = 'Please wait while we send your request.';
 				return;
 			}
 			if ( mode === 'success' ) {
 				this.submitStateIcon.textContent = '\u2713';
+				this.submitStateIcon.classList.add( 'kgr-submit-state__icon--success' );
 				this.submitStateTitle.textContent = 'Request submitted successfully';
 				this.submitStateMessage.textContent = message || 'We sent your request. Please check your inbox for confirmation.';
 				return;
